@@ -683,9 +683,9 @@ static void _call_rcu(struct rcu_head *head,
 		      struct call_rcu_data *crdp)
 {
 	cds_wfcq_node_init(&head->next);
-	head->func = func;
+	head->func = func;//设置回调对应的函数
 	cds_wfcq_enqueue(&crdp->cbs_head, &crdp->cbs_tail, &head->next);
-	uatomic_inc(&crdp->qlen);
+	uatomic_inc(&crdp->qlen);//增加callback计数
 	wake_call_rcu_thread(crdp);
 }
 

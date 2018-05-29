@@ -34,10 +34,10 @@ static inline
 void cds_hlist_add_head_rcu(struct cds_hlist_node *newp,
 		struct cds_hlist_head *head)
 {
-	newp->next = head->next;
-	newp->prev = (struct cds_hlist_node *)head;
+	newp->next = head->next;//先设置newp->next
+	newp->prev = (struct cds_hlist_node *)head;//设置newp->prev
 	if (head->next)
-		head->next->prev = newp;
+		head->next->prev = newp;//如果需要更新head->next的prev链
 	rcu_assign_pointer(head->next, newp);
 }
 
@@ -46,8 +46,8 @@ static inline
 void cds_hlist_del_rcu(struct cds_hlist_node *elem)
 {
 	if (elem->next)
-		elem->next->prev = elem->prev;
-	CMM_STORE_SHARED(elem->prev->next, elem->next);
+		elem->next->prev = elem->prev;//更新prev链
+	CMM_STORE_SHARED(elem->prev->next, elem->next);//更新elem->prev的next字段
 }
 
 /*

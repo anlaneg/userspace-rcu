@@ -24,6 +24,7 @@
 #define caa_likely(x)	__builtin_expect(!!(x), 1)
 #define caa_unlikely(x)	__builtin_expect(!!(x), 0)
 
+//防编译器乱序优化
 #define	cmm_barrier()	__asm__ __volatile__ ("" : : : "memory")
 
 /*
