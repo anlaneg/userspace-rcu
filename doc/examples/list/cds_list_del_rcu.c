@@ -67,12 +67,12 @@ int main(int argc, char **argv)
 	 */
 	cds_list_for_each_entry_safe(node, n, &mylist, node) {
 		if (node->value > 0) {
-			cds_list_del_rcu(&node->node);
+			cds_list_del_rcu(&node->node);//node移除
 			/*
 			 * We can only reclaim memory after a grace
 			 * period has passed after cds_list_del_rcu().
 			 */
-			call_rcu(&node->rcu_head, free_node_rcu);
+			call_rcu(&node->rcu_head, free_node_rcu);//注册在合适的时机调用free_node_rcu
 		}
 	}
 

@@ -120,6 +120,7 @@ extern void *rcu_set_pointer_sym(void **p, void *v);
  * address as first parameter. Provided for compatibility with the Linux kernel
  * RCU semantic.
  */
+//实现ptr=new的原子赋值，并考虑内存barrier
 #define rcu_assign_pointer(p, v)	rcu_set_pointer((&p), (v))
 
 #ifdef __cplusplus

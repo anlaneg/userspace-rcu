@@ -51,7 +51,9 @@
 #define CMM_STORE_SHARED(x, v)						\
 	__extension__							\
 	({								\
+		/*设置内存x的值为v*/\
 		__typeof__(x) _v = _CMM_STORE_SHARED(x, v);		\
+		/*保证x值对其它cpu可见*/\
 		cmm_smp_wmc();						\
 		_v = _v;	/* Work around clang "unused result" */	\
 	})

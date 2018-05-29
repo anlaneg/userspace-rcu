@@ -28,6 +28,7 @@ struct mynode {
 	struct cds_list_head node;	/* Linked-list chaining */
 };
 
+//仅仅演示cds_list_add_rcu函数
 int main(int argc, char **argv)
 {
 	int values[] = { -5, 42, 36, 24, };
@@ -40,6 +41,7 @@ int main(int argc, char **argv)
 	 * Adding nodes to the linked-list. Safe against concurrent
 	 * RCU traversals, require mutual exclusion with list updates.
 	 */
+	//申请空间，并填充values中的内容
 	for (i = 0; i < CAA_ARRAY_SIZE(values); i++) {
 		node = malloc(sizeof(*node));
 		if (!node) {
@@ -47,13 +49,14 @@ int main(int argc, char **argv)
 			goto end;
 		}
 		node->value = values[i];
-		cds_list_add_rcu(&node->node, &mylist);
+		cds_list_add_rcu(&node->node, &mylist);//将node加入到mylist中
 	}
 
 	/*
 	 * Just show the list content. This is _not_ an RCU-safe
 	 * iteration on the list.
 	 */
+	//显示list中内容
 	printf("mylist content:");
 	cds_list_for_each_entry(node, &mylist, node) {
 		printf(" %d", node->value);

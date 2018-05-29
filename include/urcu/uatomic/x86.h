@@ -587,6 +587,7 @@ extern unsigned long _compat_uatomic_add_return(void *addr,
 #endif
 
 /* Read is atomic even in compat mode */
+//注展开的一种可能为_uatomic_set(addr,v)，set只是参数
 #define uatomic_set(addr, v)			\
 		UATOMIC_COMPAT(set(addr, v))
 

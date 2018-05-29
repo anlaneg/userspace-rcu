@@ -34,6 +34,7 @@ extern "C" {
 #define CAA_CACHE_LINE_SIZE	128
 
 #ifdef CONFIG_RCU_HAVE_FENCE
+//mfence保证系统在后面的memory访问之前，先前的memory访问都已经结束。
 #define cmm_mb()    __asm__ __volatile__ ("mfence":::"memory")
 
 /*
@@ -41,7 +42,9 @@ extern "C" {
  * using SSE or working with I/O areas.  cmm_smp_rmb/cmm_smp_wmb are
  * only compiler barriers, which is enough for general use.
  */
+//串行化发生在SFENCE指令之前的读操作但是不影响写操作。
 #define cmm_rmb()     __asm__ __volatile__ ("lfence":::"memory")
+//串行化发生在SFENCE指令之前的写操作但是不影响读操作。
 #define cmm_wmb()     __asm__ __volatile__ ("sfence"::: "memory")
 #define cmm_smp_rmb() cmm_barrier()
 #define cmm_smp_wmb() cmm_barrier()

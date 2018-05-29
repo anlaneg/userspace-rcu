@@ -33,13 +33,14 @@
 static inline
 void cds_list_add_rcu(struct cds_list_head *newp, struct cds_list_head *head)
 {
-	newp->next = head->next;
-	newp->prev = head;
-	head->next->prev = newp;
-	rcu_assign_pointer(head->next, newp);
+	newp->next = head->next;//设置next(此时newp还不能被访问）
+	newp->prev = head;//设置prev(比链表）
+	head->next->prev = newp;//设置反向（这个不能反向访问）
+	rcu_assign_pointer(head->next, newp);//仅保证原子？
 }
 
 /* Add new element at the tail of the list. */
+//将元素加入到尾部
 static inline
 void cds_list_add_tail_rcu(struct cds_list_head *newp,
 		struct cds_list_head *head)

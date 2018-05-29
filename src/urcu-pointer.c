@@ -37,8 +37,10 @@ void *rcu_dereference_sym(void *p)
 	return _rcu_dereference(p);
 }
 
+//实现原子的p=v,且考虑内存berrier
 void *rcu_set_pointer_sym(void **p, void *v)
 {
+	//此操作前，所有的store均已完成
 	cmm_wmb();
 	uatomic_set(p, v);
 	return v;
