@@ -142,6 +142,7 @@ int _cds_wfs_push(cds_wfs_stack_ptr_t u_stack, struct cds_wfs_node *node)
 	struct __cds_wfs_stack *s = u_stack._s;
 	struct cds_wfs_head *old_head, *new_head;
 
+	//由node得出struct cds_wfs_head
 	assert(node->next == NULL);
 	new_head = caa_container_of(node, struct cds_wfs_head, node);
 	/*

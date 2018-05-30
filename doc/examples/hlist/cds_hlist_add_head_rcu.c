@@ -55,6 +55,7 @@ int main(int argc, char **argv)
 	 * iteration on the list.
 	 */
 	printf("mylist content:");
+	//遍历mylist链表
 	cds_hlist_for_each_entry_2(node, &mylist, node) {
 		printf(" %d", node->value);
 	}

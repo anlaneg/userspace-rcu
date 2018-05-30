@@ -114,7 +114,9 @@ struct urcu_tls {
 			}					\
 			pthread_mutex_unlock(&__tls_ ## name.init_mutex); \
 		}						\
-		cmm_smp_rmb();	/* read init_done before getting key */ \
+		/*这句代码是否有意义？前面有if进行检查，执行器即便乱序，也在发现if预判失败后rollback*/\
+		/*存在一种情况，if预判成功，但pthread_getspecific先执行*/\
+		cmm_smp_rmb();	/* read init_done before getting key */　 \
 		__tls_p = pthread_getspecific(__tls_ ## name.key); \
 		if (caa_unlikely(__tls_p == NULL)) {		\
 			__tls_p = calloc(1, sizeof(type));	\
@@ -124,11 +126,14 @@ struct urcu_tls {
 		return __tls_p;					\
 	}
 
+//定义per线程变量
 # define DEFINE_URCU_TLS(type, name)				\
 	DEFINE_URCU_TLS_1(type, name)
 
+//取per线程变量
 # define URCU_TLS_1(name)	(*__tls_access_ ## name())
 
+//取per线程变量
 # define URCU_TLS(name)		URCU_TLS_1(name)
 
 #endif	/* #else #ifndef CONFIG_RCU_TLS */

@@ -38,7 +38,7 @@ void cds_hlist_add_head_rcu(struct cds_hlist_node *newp,
 	newp->prev = (struct cds_hlist_node *)head;//设置newp->prev
 	if (head->next)
 		head->next->prev = newp;//如果需要更新head->next的prev链
-	rcu_assign_pointer(head->next, newp);
+	rcu_assign_pointer(head->next, newp);//原子设置newp
 }
 
 /* Remove element from list. */

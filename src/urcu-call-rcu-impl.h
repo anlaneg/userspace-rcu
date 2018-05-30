@@ -135,12 +135,14 @@ static void alloc_cpu_call_rcu_data(void)
 
 	if (maxcpus != 0)
 		return;
-	maxcpus = sysconf(_SC_NPROCESSORS_CONF);
+	maxcpus = sysconf(_SC_NPROCESSORS_CONF);//获取系统cpu数目
 	if (maxcpus <= 0) {
 		return;
 	}
+	//为每个cpu申请一个struct call_rcu_data类型
 	p = malloc(maxcpus * sizeof(*per_cpu_call_rcu_data));
 	if (p != NULL) {
+		//清０，并设置
 		memset(p, '\0', maxcpus * sizeof(*per_cpu_call_rcu_data));
 		rcu_set_pointer(&per_cpu_call_rcu_data, p);
 	} else {
@@ -173,6 +175,7 @@ static void alloc_cpu_call_rcu_data(void)
 
 /* Acquire the specified pthread mutex. */
 
+//封装pthread_mutex_lock函数，实现加锁
 static void call_rcu_lock(pthread_mutex_t *pmp)
 {
 	int ret;
@@ -183,7 +186,7 @@ static void call_rcu_lock(pthread_mutex_t *pmp)
 }
 
 /* Release the specified pthread mutex. */
-
+//封装pthread_mutex_unlock函数，实现解锁
 static void call_rcu_unlock(pthread_mutex_t *pmp)
 {
 	int ret;
@@ -200,24 +203,25 @@ static void call_rcu_unlock(pthread_mutex_t *pmp)
  */
 #if HAVE_SCHED_SETAFFINITY
 static
+//设置cpu亲昵性
 int set_thread_cpu_affinity(struct call_rcu_data *crdp)
 {
 	cpu_set_t mask;
 	int ret;
 
 	if (crdp->cpu_affinity < 0)
-		return 0;
+		return 0;//未配置
 	if (++crdp->gp_count & SET_AFFINITY_CHECK_PERIOD_MASK)
 		return 0;
 	if (urcu_sched_getcpu() == crdp->cpu_affinity)
-		return 0;
+		return 0;//已设置
 
 	CPU_ZERO(&mask);
 	CPU_SET(crdp->cpu_affinity, &mask);
 #if SCHED_SETAFFINITY_ARGS == 2
 	ret = sched_setaffinity(0, &mask);
 #else
-	ret = sched_setaffinity(0, sizeof(mask), &mask);
+	ret = sched_setaffinity(0, sizeof(mask), &mask);//设置cpu亲昵
 #endif
 	/*
 	 * EINVAL is fine: can be caused by hotunplugged CPUs, or by
@@ -314,6 +318,7 @@ static void *call_rcu_thread(void *arg)
 	struct call_rcu_data *crdp = (struct call_rcu_data *) arg;
 	int rt = !!(uatomic_read(&crdp->flags) & URCU_CALL_RCU_RT);
 
+	//设置cpu亲昵
 	if (set_thread_cpu_affinity(crdp))
 		urcu_die(errno);
 
@@ -322,7 +327,7 @@ static void *call_rcu_thread(void *arg)
 	 */
 	rcu_register_thread();
 
-	URCU_TLS(thread_call_rcu_data) = crdp;
+	URCU_TLS(thread_call_rcu_data) = crdp;//为当前线程设置crdp
 	if (!rt) {
 		uatomic_dec(&crdp->futex);
 		/* Decrement futex before reading call_rcu list */
@@ -334,6 +339,7 @@ static void *call_rcu_thread(void *arg)
 		struct cds_wfcq_node *cbs, *cbs_tmp_n;
 		enum cds_wfcq_ret splice_ret;
 
+		//设置cpu亲昵性
 		if (set_thread_cpu_affinity(crdp))
 			urcu_die(errno);
 
@@ -345,12 +351,12 @@ static void *call_rcu_thread(void *arg)
 			 * still be non-empty though.
 			 */
 			rcu_unregister_thread();
-			cmm_smp_mb__before_uatomic_or();
-			uatomic_or(&crdp->flags, URCU_CALL_RCU_PAUSED);
+			cmm_smp_mb__before_uatomic_or();//防编译器优化
+			uatomic_or(&crdp->flags, URCU_CALL_RCU_PAUSED);//原子or操作
 			while ((uatomic_read(&crdp->flags) & URCU_CALL_RCU_PAUSE) != 0)
-				(void) poll(NULL, 0, 1);
-			uatomic_and(&crdp->flags, ~URCU_CALL_RCU_PAUSED);
-			cmm_smp_mb__after_uatomic_and();
+				(void) poll(NULL, 0, 1);//延迟1ms
+			uatomic_and(&crdp->flags, ~URCU_CALL_RCU_PAUSED);//原子and操作
+			cmm_smp_mb__after_uatomic_and();//防编译器优化
 			rcu_register_thread();
 		}
 
@@ -412,7 +418,7 @@ static void *call_rcu_thread(void *arg)
  * structure, linking the structure in as specified.  Caller must hold
  * call_rcu_mutex.
  */
-
+//初始化crdpp，并创建线程运行call_rcu_thread
 static void call_rcu_data_init(struct call_rcu_data **crdpp,
 			       unsigned long flags,
 			       int cpu_affinity)
@@ -431,7 +437,7 @@ static void call_rcu_data_init(struct call_rcu_data **crdpp,
 	cds_list_add(&crdp->list, &call_rcu_data_list);
 	crdp->cpu_affinity = cpu_affinity;
 	crdp->gp_count = 0;
-	cmm_smp_mb();  /* Structure initialized before pointer is planted. */
+	cmm_smp_mb();  /* Structure initialized before pointer is planted. *///防438句先执行
 	*crdpp = crdp;
 	ret = pthread_create(&crdp->tid, NULL, call_rcu_thread, crdp);
 	if (ret)
@@ -448,6 +454,7 @@ static void call_rcu_data_init(struct call_rcu_data **crdpp,
  * should be protected by RCU read-side lock.
  */
 
+//返回对应cpu的call_rcu_data
 struct call_rcu_data *get_cpu_call_rcu_data(int cpu)
 {
 	static int warned = 0;
@@ -461,7 +468,7 @@ struct call_rcu_data *get_cpu_call_rcu_data(int cpu)
 		warned = 1;
 	}
 	if (cpu < 0 || maxcpus <= cpu)
-		return NULL;
+		return NULL;//参数有误时失回０
 	return rcu_dereference(pcpu_crdp[cpu]);
 }
 
@@ -580,6 +587,7 @@ struct call_rcu_data *get_call_rcu_data(void)
 {
 	struct call_rcu_data *crd;
 
+	//如果有per线程的thread_call_rcu_data，则直接返回
 	if (URCU_TLS(thread_call_rcu_data) != NULL)
 		return URCU_TLS(thread_call_rcu_data);
 
@@ -635,16 +643,19 @@ int create_all_cpu_call_rcu_data(unsigned long flags)
 	alloc_cpu_call_rcu_data();
 	call_rcu_unlock(&call_rcu_mutex);
 	if (maxcpus <= 0) {
+		//maxcpus指系统中cpu数，如果<=0则为参数错误
 		errno = EINVAL;
 		return -EINVAL;
 	}
 	if (per_cpu_call_rcu_data == NULL) {
+		//alloc_cpu_call_rcu_data申请内存失败
 		errno = ENOMEM;
 		return -ENOMEM;
 	}
 	for (i = 0; i < maxcpus; i++) {
 		call_rcu_lock(&call_rcu_mutex);
 		if (get_cpu_call_rcu_data(i)) {
+			//如果此cpu已有对应的rcu_data，则跳过
 			call_rcu_unlock(&call_rcu_mutex);
 			continue;
 		}

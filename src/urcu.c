@@ -523,6 +523,7 @@ int rcu_read_ongoing(void)
 
 void rcu_register_thread(void)
 {
+	//设置当前进程pthread_id
 	URCU_TLS(rcu_reader).tid = pthread_self();
 	assert(URCU_TLS(rcu_reader).need_mb == 0);
 	assert(!(URCU_TLS(rcu_reader).ctr & RCU_GP_CTR_NEST_MASK));
@@ -531,10 +532,11 @@ void rcu_register_thread(void)
 	assert(!URCU_TLS(rcu_reader).registered);
 	URCU_TLS(rcu_reader).registered = 1;
 	rcu_init();	/* In case gcc does not support constructor attribute */
-	cds_list_add(&URCU_TLS(rcu_reader).node, &registry);
+	cds_list_add(&URCU_TLS(rcu_reader).node, &registry);//加入到registry链表
 	mutex_unlock(&rcu_registry_lock);
 }
 
+//解注册
 void rcu_unregister_thread(void)
 {
 	mutex_lock(&rcu_registry_lock);

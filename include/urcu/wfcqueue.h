@@ -56,6 +56,7 @@ enum cds_wfcq_state {
 	CDS_WFCQ_STATE_LAST =		(1U << 0),
 };
 
+//用于构成单链表
 struct cds_wfcq_node {
 	struct cds_wfcq_node *next;
 };
@@ -66,7 +67,7 @@ struct cds_wfcq_node {
  * false-sharing between enqueue and dequeue.
  */
 struct __cds_wfcq_head {
-	struct cds_wfcq_node node;
+	struct cds_wfcq_node node;//头指针
 };
 
 struct cds_wfcq_head {
@@ -80,6 +81,7 @@ struct cds_wfcq_head {
  * struct cds_wfcq_head and struct __cds_wfcq_head on any of those two
  * types.
  */
+//声明透明union以便支持函数指针，来容许两种不同类型的传参
 typedef union {
 	struct __cds_wfcq_head *_h;
 	struct cds_wfcq_head *h;
@@ -125,7 +127,7 @@ static inline cds_wfcq_head_ptr_t cds_wfcq_head_cast(struct cds_wfcq_head *head)
 #endif /* #else #ifndef __cplusplus */
 
 struct cds_wfcq_tail {
-	struct cds_wfcq_node *p;
+	struct cds_wfcq_node *p;//尾指针
 };
 
 #ifdef _LGPL_SOURCE

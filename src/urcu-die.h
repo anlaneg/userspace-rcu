@@ -27,6 +27,7 @@
 #include <stdio.h>
 #include <string.h>
 
+//主动挂掉程序
 #define urcu_die(cause)								\
 do {										\
 	fprintf(stderr, "(" __FILE__ ":%s@%u) Unrecoverable error: %s\n",	\

@@ -52,12 +52,13 @@ unsigned long __uatomic_cmpxchg(void *addr, unsigned long old,
 	{
 		unsigned char result = old;
 
+		//old如果与*__hp(addr)相等，则将_new赋给*__hp(addr)
 		__asm__ __volatile__(
-		"lock; cmpxchgb %2, %1"
-			: "+a"(result), "+m"(*__hp(addr))
-			: "q"((unsigned char)_new)
+		"lock; cmpxchgb %2, %1" //%2,%1指的是操作数，总共有n个操作数（包括输入和输出），操作数的编号从０开始，
+			: "+a"(result), "+m"(*__hp(addr)) //输出段
+			: "q"((unsigned char)_new) //输入段
 			: "memory");
-		return result;
+		return result;//返回旧的数据
 	}
 	case 2:
 	{
@@ -111,6 +112,7 @@ unsigned long __uatomic_cmpxchg(void *addr, unsigned long old,
 
 /* xchg */
 
+//实现变量交换
 static inline __attribute__((always_inline))
 unsigned long __uatomic_exchange(void *addr, unsigned long val, int len)
 {
@@ -603,6 +605,7 @@ extern unsigned long _compat_uatomic_add_return(void *addr,
 
 #define uatomic_or(addr, v)		\
 		UATOMIC_COMPAT(or(addr, v))
+//防编译器乱序
 #define cmm_smp_mb__before_uatomic_or()		cmm_barrier()
 #define cmm_smp_mb__after_uatomic_or()		cmm_barrier()
 

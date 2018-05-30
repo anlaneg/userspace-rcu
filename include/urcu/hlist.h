@@ -39,6 +39,7 @@ void CDS_INIT_HLIST_HEAD(struct cds_hlist_head *ptr)
 #define CDS_HLIST_HEAD_INIT(name) \
 	{ .next = NULL }
 
+//将ptr更指变更为type类型（ptr原来指向type类型的member成员）
 /* Get typed element from list at a given position. */
 #define cds_hlist_entry(ptr, type, member) \
 	((type *) ((char *) (ptr) - (unsigned long) (&((type *) 0)->member)))
@@ -78,6 +79,7 @@ void cds_hlist_del(struct cds_hlist_node *elem)
  * and 4. We implement cds_hlist_for_each_entry_2() and
  * cds_hlist_for_each_entry_safe_2() to follow the Linux kernel APIs.
  */
+//与cds_hlist_for_each_entry_safe_2逻辑一致
 #define cds_hlist_for_each_entry(entry, pos, head, member) \
 	for (pos = (head)->next, \
 			entry = cds_hlist_entry(pos, __typeof__(*entry), member); \
@@ -92,6 +94,7 @@ void cds_hlist_del(struct cds_hlist_node *elem)
 		pos = p, \
 			entry = cds_hlist_entry(pos, __typeof__(*entry), member))
 
+//遍历head链上的元素
 #define cds_hlist_for_each_entry_2(entry, head, member) \
 	for (entry = ((head)->next == NULL ? NULL \
 			: cds_hlist_entry((head)->next, __typeof__(*entry), member)); \
@@ -99,6 +102,7 @@ void cds_hlist_del(struct cds_hlist_node *elem)
 		entry = (entry->member.next == NULL ? NULL \
 			: cds_hlist_entry(entry->member.next, __typeof__(*entry), member)))
 
+//遍历head链上元素，防删除（这里比较有意思的写法是逗号运算符的使用）
 #define cds_hlist_for_each_entry_safe_2(entry, e, head, member) \
 	for (entry = ((head)->next == NULL ? NULL \
 			: cds_hlist_entry((head)->next, __typeof__(*entry), member)); \

@@ -95,6 +95,7 @@ static inline void _cds_wfcq_node_init(struct cds_wfcq_node *node)
  * cds_wfcq_init: initialize wait-free queue (with lock). Pair with
  * cds_wfcq_destroy().
  */
+//初始化首尾，初始化锁(含锁）
 static inline void _cds_wfcq_init(struct cds_wfcq_head *head,
 		struct cds_wfcq_tail *tail)
 {
@@ -111,6 +112,7 @@ static inline void _cds_wfcq_init(struct cds_wfcq_head *head,
  * cds_wfcq_destroy: destroy wait-free queue (with lock). Pair with
  * cds_wfcq_init().
  */
+//销毁
 static inline void _cds_wfcq_destroy(struct cds_wfcq_head *head,
 		struct cds_wfcq_tail *tail)
 {
@@ -122,6 +124,7 @@ static inline void _cds_wfcq_destroy(struct cds_wfcq_head *head,
  * __cds_wfcq_init: initialize wait-free queue (without lock). Don't
  * pair with any destroy function.
  */
+//初始化首尾（不含锁）
 static inline void ___cds_wfcq_init(struct __cds_wfcq_head *head,
 		struct cds_wfcq_tail *tail)
 {
@@ -153,10 +156,13 @@ static inline bool _cds_wfcq_empty(cds_wfcq_head_ptr_t u_head,
 	 * common case to ensure that dequeuers do not frequently access
 	 * enqueuer's tail->p cache line.
 	 */
+	//采用CMM_LOAD_SHARED在这里检查head->node.nex与tail->p的值，可以保证
+	//这两条指令是顺序执行的，编译器不会产生乱序
 	return CMM_LOAD_SHARED(head->node.next) == NULL
 		&& CMM_LOAD_SHARED(tail->p) == &head->node;
 }
 
+//出队加锁
 static inline void _cds_wfcq_dequeue_lock(struct cds_wfcq_head *head,
 		struct cds_wfcq_tail *tail)
 {
@@ -166,6 +172,7 @@ static inline void _cds_wfcq_dequeue_lock(struct cds_wfcq_head *head,
 	assert(!ret);
 }
 
+//出队解锁
 static inline void _cds_wfcq_dequeue_unlock(struct cds_wfcq_head *head,
 		struct cds_wfcq_tail *tail)
 {
@@ -175,6 +182,7 @@ static inline void _cds_wfcq_dequeue_unlock(struct cds_wfcq_head *head,
 	assert(!ret);
 }
 
+//将new_head加入到u_head链表中（内部函数）（assert(new_head == new_tail））此函数不支持并发
 static inline bool ___cds_wfcq_append(cds_wfcq_head_ptr_t u_head,
 		struct cds_wfcq_tail *tail,
 		struct cds_wfcq_node *new_head,
@@ -188,7 +196,7 @@ static inline bool ___cds_wfcq_append(cds_wfcq_head_ptr_t u_head,
 	 * stores to data structure containing node and setting
 	 * node->next to NULL before publication.
 	 */
-	old_tail = uatomic_xchg(&tail->p, new_tail);
+	old_tail = uatomic_xchg(&tail->p, new_tail);//等价与 old_tail = tail->p ; tail->p = new_tail;
 
 	/*
 	 * Implicit memory barrier after uatomic_xchg() orders store to
@@ -199,7 +207,7 @@ static inline bool ___cds_wfcq_append(cds_wfcq_head_ptr_t u_head,
 	 * store will append "node" to the queue from a dequeuer
 	 * perspective.
 	 */
-	CMM_STORE_SHARED(old_tail->next, new_head);
+	CMM_STORE_SHARED(old_tail->next, new_head);//设置old_tail->next =new_head
 	/*
 	 * Return false if queue was empty prior to adding the node,
 	 * else return true.
@@ -234,10 +242,11 @@ ___cds_wfcq_busy_wait(int *attempt, int blocking)
 	if (!blocking)
 		return 1;
 	if (++(*attempt) >= WFCQ_ADAPT_ATTEMPTS) {
+		//尝试次数过多，缓一下
 		(void) poll(NULL, 0, WFCQ_WAIT);	/* Wait for 10ms */
 		*attempt = 0;
 	} else {
-		caa_cpu_relax();
+		caa_cpu_relax();//执行空指令
 	}
 	return 0;
 }
@@ -254,6 +263,7 @@ ___cds_wfcq_node_sync_next(struct cds_wfcq_node *node, int blocking)
 	/*
 	 * Adaptative busy-looping waiting for enqueuer to complete enqueue.
 	 */
+	//忙等待进行出队，每尝试次数超限，则sleep会。
 	while ((next = CMM_LOAD_SHARED(node->next)) == NULL) {
 		if (___cds_wfcq_busy_wait(&attempt, blocking))
 			return CDS_WFCQ_WOULDBLOCK;

@@ -70,7 +70,7 @@ enum cds_wfs_state {
  * pointer when returned by __cds_wfs_pop_blocking.
  */
 struct cds_wfs_node {
-	struct cds_wfs_node *next;
+	struct cds_wfs_node *next;//单链表
 };
 
 /*

@@ -27,7 +27,7 @@
 static inline
 int urcu_sched_getcpu(void)
 {
-	return sched_getcpu();
+	return sched_getcpu();//获取当前线程进行在那个cpu上
 }
 #elif defined(HAVE_GETCPUID)
 #include <sys/processor.h>

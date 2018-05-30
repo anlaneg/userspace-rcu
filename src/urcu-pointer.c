@@ -42,7 +42,7 @@ void *rcu_set_pointer_sym(void **p, void *v)
 {
 	//此操作前，所有的store均已完成
 	cmm_wmb();
-	uatomic_set(p, v);
+	uatomic_set(p, v);//原子使*p=v
 	return v;
 }
 

@@ -24,11 +24,13 @@ struct urcu_ref {
 	long refcount; /* ATOMIC */
 };
 
+//设置引用计数的引用值
 static inline void urcu_ref_set(struct urcu_ref *ref, long val)
 {
 	uatomic_set(&ref->refcount, val);
 }
 
+//初始化引用计数对象
 static inline void urcu_ref_init(struct urcu_ref *ref)
 {
 	urcu_ref_set(ref, 1);

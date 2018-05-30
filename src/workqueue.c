@@ -66,7 +66,7 @@ struct urcu_workqueue {
 	int32_t futex;
 	unsigned long qlen; /* maintained for debugging. */
 	pthread_t tid;
-	int cpu_affinity;
+	int cpu_affinity;//要绑定的cpu
 	unsigned long loop_count;
 	void *priv;
 	void (*grace_period_fct)(struct urcu_workqueue *workqueue, void *priv);
@@ -173,6 +173,7 @@ static void *workqueue_thread(void *arg)
 	struct urcu_workqueue *workqueue = (struct urcu_workqueue *) arg;
 	int rt = !!(uatomic_read(&workqueue->flags) & URCU_WORKQUEUE_RT);
 
+	//将workqueue绑定到cpu上
 	if (set_thread_cpu_affinity(workqueue))
 		urcu_die(errno);
 
@@ -457,6 +458,7 @@ void urcu_workqueue_resume_worker(struct urcu_workqueue *workqueue)
 		(void) poll(NULL, 0, 1);
 }
 
+//创建线程，设置workqueue
 void urcu_workqueue_create_worker(struct urcu_workqueue *workqueue)
 {
 	int ret;

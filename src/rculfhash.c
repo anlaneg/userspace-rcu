@@ -625,7 +625,7 @@ static void ht_init_nr_cpus_mask(void)
 {
 	long maxcpus;
 
-	maxcpus = sysconf(_SC_NPROCESSORS_CONF);
+	maxcpus = sysconf(_SC_NPROCESSORS_CONF);//提取系统中有多少cpu
 	if (maxcpus <= 0) {
 		nr_cpus_mask = -2;
 		return;

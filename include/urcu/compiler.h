@@ -39,6 +39,7 @@
  * use is to mediate communication between process-level code and irq/NMI
  * handlers, all running on the same CPU.
  */
+//只能保证编译器不乱序，不能对cpu产生任何影响（可保证编译器不设置寄存器）
 #define CMM_ACCESS_ONCE(x)	(*(__volatile__  __typeof__(x) *)&(x))
 
 #ifndef caa_max

@@ -151,7 +151,7 @@ struct rcu_reader {
 	struct cds_list_head node __attribute__((aligned(CAA_CACHE_LINE_SIZE)));
 	pthread_t tid;
 	/* Reader registered flag, for internal checks. */
-	unsigned int registered:1;
+	unsigned int registered:1;//标记是否已注册
 };
 
 extern DECLARE_URCU_TLS(struct rcu_reader, rcu_reader);
