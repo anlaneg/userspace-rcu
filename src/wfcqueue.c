@@ -31,19 +31,19 @@
 
 void cds_wfcq_node_init(struct cds_wfcq_node *node)
 {
-	_cds_wfcq_node_init(node);
+	_cds_wfcq_node_init(node);//节点初始化
 }
 
 void cds_wfcq_init(struct cds_wfcq_head *head,
 		struct cds_wfcq_tail *tail)
 {
-	_cds_wfcq_init(head, tail);
+	_cds_wfcq_init(head, tail);//队列初始化
 }
 
 void cds_wfcq_destroy(struct cds_wfcq_head *head,
 		struct cds_wfcq_tail *tail)
 {
-	_cds_wfcq_destroy(head, tail);
+	_cds_wfcq_destroy(head, tail);//队列销毁
 }
 
 void __cds_wfcq_init(struct __cds_wfcq_head *head,

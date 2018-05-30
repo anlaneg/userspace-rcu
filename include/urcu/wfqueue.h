@@ -45,6 +45,7 @@ extern "C" {
  * Paul E. McKenney.
  */
 
+//非等待入队,阻塞出队
 struct cds_wfq_node {
 	struct cds_wfq_node *next;
 };

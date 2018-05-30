@@ -219,8 +219,11 @@ static inline void _rcu_read_lock(void)
 {
 	unsigned long tmp;
 
+	//断言当前线程已注册
 	urcu_assert(URCU_TLS(rcu_reader).registered);
+	//要求编译器不得优化合并下面代码
 	cmm_barrier();
+	//取ctr副本，并校验未打上RCU_GP_CTR_NEST_MASK标记
 	tmp = URCU_TLS(rcu_reader).ctr;
 	urcu_assert((tmp & RCU_GP_CTR_NEST_MASK) != RCU_GP_CTR_NEST_MASK);
 	_rcu_read_lock_update(tmp);

@@ -239,6 +239,7 @@ static inline bool _cds_wfcq_enqueue(cds_wfcq_head_ptr_t head,
 static inline bool
 ___cds_wfcq_busy_wait(int *attempt, int blocking)
 {
+	//如果不容许阻塞，则直接返回1
 	if (!blocking)
 		return 1;
 	if (++(*attempt) >= WFCQ_ADAPT_ATTEMPTS) {
@@ -266,12 +267,13 @@ ___cds_wfcq_node_sync_next(struct cds_wfcq_node *node, int blocking)
 	//忙等待进行出队，每尝试次数超限，则sleep会。
 	while ((next = CMM_LOAD_SHARED(node->next)) == NULL) {
 		if (___cds_wfcq_busy_wait(&attempt, blocking))
-			return CDS_WFCQ_WOULDBLOCK;
+			return CDS_WFCQ_WOULDBLOCK;//返回需要阻塞错误
 	}
 
 	return next;
 }
 
+//从队头出队
 static inline struct cds_wfcq_node *
 ___cds_wfcq_first(cds_wfcq_head_ptr_t u_head,
 		struct cds_wfcq_tail *tail,
@@ -280,8 +282,10 @@ ___cds_wfcq_first(cds_wfcq_head_ptr_t u_head,
 	struct __cds_wfcq_head *head = u_head._h;
 	struct cds_wfcq_node *node;
 
+	//检查队列是否为空
 	if (_cds_wfcq_empty(__cds_wfcq_head_cast(head), tail))
 		return NULL;
+	//不为空，则同步出队
 	node = ___cds_wfcq_node_sync_next(&head->node, blocking);
 	/* Load head->node.next before loading node's content */
 	cmm_smp_read_barrier_depends();
@@ -306,6 +310,7 @@ static inline struct cds_wfcq_node *
 ___cds_wfcq_first_blocking(cds_wfcq_head_ptr_t head,
 		struct cds_wfcq_tail *tail)
 {
+	//出队头元素，如果队头暂无元素，则阻塞等待
 	return ___cds_wfcq_first(head, tail, 1);
 }
 
@@ -320,6 +325,7 @@ static inline struct cds_wfcq_node *
 ___cds_wfcq_first_nonblocking(cds_wfcq_head_ptr_t head,
 		struct cds_wfcq_tail *tail)
 {
+	//出队头元素，如果队头暂无元素，则返回CDS_WFCQ_WOULDBLOCK
 	return ___cds_wfcq_first(head, tail, 0);
 }
 
@@ -338,6 +344,8 @@ ___cds_wfcq_next(cds_wfcq_head_ptr_t head,
 	 * do not frequently access enqueuer's tail->p cache line.
 	 */
 	if ((next = CMM_LOAD_SHARED(node->next)) == NULL) {
+		//如果node没有后继，则检查其是否为队列最后一个，如果是，则返回NULL
+		//否则同步获取next节点
 		/* Load node->next before tail->p */
 		cmm_smp_rmb();
 		if (CMM_LOAD_SHARED(tail->p) == node)
@@ -369,6 +377,7 @@ ___cds_wfcq_next_blocking(cds_wfcq_head_ptr_t head,
 		struct cds_wfcq_tail *tail,
 		struct cds_wfcq_node *node)
 {
+	//同步获取node的next节点
 	return ___cds_wfcq_next(head, tail, node, 1);
 }
 
@@ -383,6 +392,7 @@ ___cds_wfcq_next_nonblocking(cds_wfcq_head_ptr_t head,
 		struct cds_wfcq_tail *tail,
 		struct cds_wfcq_node *node)
 {
+	//采用非阻塞方式获取node的next节点
 	return ___cds_wfcq_next(head, tail, node, 0);
 }
 
@@ -398,13 +408,15 @@ ___cds_wfcq_dequeue_with_state(cds_wfcq_head_ptr_t u_head,
 	if (state)
 		*state = 0;
 
+	//如果队列为空，直接返回
 	if (_cds_wfcq_empty(__cds_wfcq_head_cast(head), tail)) {
 		return NULL;
 	}
 
+	//出队
 	node = ___cds_wfcq_node_sync_next(&head->node, blocking);
 	if (!blocking && node == CDS_WFCQ_WOULDBLOCK) {
-		return CDS_WFCQ_WOULDBLOCK;
+		return CDS_WFCQ_WOULDBLOCK;//非阻塞，出队失败
 	}
 
 	if ((next = CMM_LOAD_SHARED(node->next)) == NULL) {
@@ -423,11 +435,13 @@ ___cds_wfcq_dequeue_with_state(cds_wfcq_head_ptr_t u_head,
 		 * content.
 		 */
 		_cds_wfcq_node_init(&head->node);
+		//检查是否为last节点，如果是返回状态
 		if (uatomic_cmpxchg(&tail->p, node, &head->node) == node) {
 			if (state)
 				*state |= CDS_WFCQ_STATE_LAST;
 			return node;
 		}
+		//获得next节点
 		next = ___cds_wfcq_node_sync_next(node, blocking);
 		/*
 		 * In nonblocking mode, if we would need to block to
@@ -436,14 +450,14 @@ ___cds_wfcq_dequeue_with_state(cds_wfcq_head_ptr_t u_head,
 		 */
 		if (!blocking && next == CDS_WFCQ_WOULDBLOCK) {
 			head->node.next = node;
-			return CDS_WFCQ_WOULDBLOCK;
+			return CDS_WFCQ_WOULDBLOCK;//如果失败，则返回
 		}
 	}
 
 	/*
 	 * Move queue head forward.
 	 */
-	head->node.next = next;
+	head->node.next = next;//将next节点串在next链上
 
 	/* Load q->head.next before loading node's content */
 	cmm_smp_read_barrier_depends();
@@ -463,6 +477,7 @@ static inline struct cds_wfcq_node *
 ___cds_wfcq_dequeue_with_state_blocking(cds_wfcq_head_ptr_t head,
 		struct cds_wfcq_tail *tail, int *state)
 {
+	//同步出队（含状态）
 	return ___cds_wfcq_dequeue_with_state(head, tail, state, 1);
 }
 
@@ -476,6 +491,7 @@ static inline struct cds_wfcq_node *
 ___cds_wfcq_dequeue_blocking(cds_wfcq_head_ptr_t head,
 		struct cds_wfcq_tail *tail)
 {
+	//阻塞出队（不关心状态)
 	return ___cds_wfcq_dequeue_with_state_blocking(head, tail, NULL);
 }
 
@@ -489,6 +505,7 @@ static inline struct cds_wfcq_node *
 ___cds_wfcq_dequeue_with_state_nonblocking(cds_wfcq_head_ptr_t head,
 		struct cds_wfcq_tail *tail, int *state)
 {
+	//非阻塞出队（含状态）
 	return ___cds_wfcq_dequeue_with_state(head, tail, state, 0);
 }
 
@@ -502,6 +519,7 @@ static inline struct cds_wfcq_node *
 ___cds_wfcq_dequeue_nonblocking(cds_wfcq_head_ptr_t head,
 		struct cds_wfcq_tail *tail)
 {
+	//非阻塞出队（不含状态）
 	return ___cds_wfcq_dequeue_with_state_nonblocking(head, tail, NULL);
 }
 
@@ -532,6 +550,7 @@ ___cds_wfcq_splice(
 	 * Initial emptiness check to speed up cases where queue is
 	 * empty: only require loads to check if queue is empty.
 	 */
+	//如果队列为空，直接返回
 	if (_cds_wfcq_empty(__cds_wfcq_head_cast(src_q_head), src_q_tail))
 		return CDS_WFCQ_RET_SRC_EMPTY;
 
@@ -541,11 +560,12 @@ ___cds_wfcq_splice(
 		 * uatomic_xchg, as well as tail pointer vs head node
 		 * address.
 		 */
+		//自src_q_head中摘下list
 		head = uatomic_xchg(&src_q_head->node.next, NULL);
 		if (head)
 			break;	/* non-empty */
 		if (CMM_LOAD_SHARED(src_q_tail->p) == &src_q_head->node)
-			return CDS_WFCQ_RET_SRC_EMPTY;
+			return CDS_WFCQ_RET_SRC_EMPTY;//再次检查src_q_head为空
 		if (___cds_wfcq_busy_wait(&attempt, blocking))
 			return CDS_WFCQ_RET_WOULDBLOCK;
 	}

@@ -36,6 +36,7 @@ extern "C" {
 
 /*
  * Concurrent queue with wait-free enqueue/blocking dequeue.
+ * 入队非等待，出队可阻塞的并发队列
  *
  * This queue has been designed and implemented collaboratively by
  * Mathieu Desnoyers and Lai Jiangshan. Inspired from

@@ -118,6 +118,7 @@ static pthread_mutex_t rcu_gp_lock = PTHREAD_MUTEX_INITIALIZER;
  * on the registry.
  * rcu_registry_lock may nest inside rcu_gp_lock.
  */
+//用于保护rcu线程的注册过程
 static pthread_mutex_t rcu_registry_lock = PTHREAD_MUTEX_INITIALIZER;
 struct rcu_gp rcu_gp = { .ctr = RCU_GP_COUNT };
 
@@ -505,12 +506,13 @@ out:
 /*
  * library wrappers to be used by non-LGPL compatible source code.
  */
-
+//加读锁
 void rcu_read_lock(void)
 {
 	_rcu_read_lock();
 }
 
+//解读锁
 void rcu_read_unlock(void)
 {
 	_rcu_read_unlock();
@@ -521,6 +523,7 @@ int rcu_read_ongoing(void)
 	return _rcu_read_ongoing();
 }
 
+//实现当前thread的rcu注册
 void rcu_register_thread(void)
 {
 	//设置当前进程pthread_id
@@ -536,7 +539,7 @@ void rcu_register_thread(void)
 	mutex_unlock(&rcu_registry_lock);
 }
 
-//解注册
+//解当前线程的rcu注册
 void rcu_unregister_thread(void)
 {
 	mutex_lock(&rcu_registry_lock);
@@ -571,6 +574,7 @@ void rcu_sys_membarrier_init(void)
 	bool available = false;
 	int mask;
 
+	//检查membarrier系统调用的支持情况
 	mask = membarrier(MEMBARRIER_CMD_QUERY, 0);
 	if (mask >= 0) {
 		if (mask & MEMBARRIER_CMD_PRIVATE_EXPEDITED) {
@@ -589,7 +593,7 @@ void rcu_init(void)
 {
 	if (init_done)
 		return;
-	init_done = 1;
+	init_done = 1;//只需要调用一次
 	rcu_sys_membarrier_init();
 }
 #endif

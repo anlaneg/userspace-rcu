@@ -40,14 +40,21 @@
 
 #ifdef RCU_MEMBARRIER
 
+//读加锁
 #define rcu_read_lock			rcu_read_lock_memb
 #define _rcu_read_lock			_rcu_read_lock_memb
+//读解锁
 #define rcu_read_unlock			rcu_read_unlock_memb
 #define _rcu_read_unlock		_rcu_read_unlock_memb
+
 #define rcu_read_ongoing		rcu_read_ongoing_memb
 #define _rcu_read_ongoing		_rcu_read_ongoing_memb
+//实现当前rcu线程的注册
 #define rcu_register_thread		rcu_register_thread_memb
+//解除当前rcu线程的注册
 #define rcu_unregister_thread		rcu_unregister_thread_memb
+
+//rcu系统初始化
 #define rcu_init			rcu_init_memb
 #define rcu_exit			rcu_exit_memb
 #define synchronize_rcu			synchronize_rcu_memb

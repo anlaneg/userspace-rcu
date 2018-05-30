@@ -33,7 +33,7 @@
 
 void cds_wfq_node_init(struct cds_wfq_node *node)
 {
-	_cds_wfq_node_init(node);
+	_cds_wfq_node_init(node);//队列节点初始化
 }
 
 void cds_wfq_init(struct cds_wfq_queue *q)
