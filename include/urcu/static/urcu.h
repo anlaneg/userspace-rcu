@@ -125,7 +125,7 @@ static inline void smp_mb_slave(void)
  */
 #define RCU_GP_COUNT		(1UL << 0)
 /* Use the amount of bits equal to half of the architecture long size */
-#define RCU_GP_CTR_PHASE	(1UL << (sizeof(unsigned long) << 2))
+#define RCU_GP_CTR_PHASE	(1UL << (sizeof(unsigned long) << 2))　//在64位机器上，此值为1<<32
 #define RCU_GP_CTR_NEST_MASK	(RCU_GP_CTR_PHASE - 1)
 
 struct rcu_gp {
@@ -145,10 +145,11 @@ extern struct rcu_gp rcu_gp;
 
 struct rcu_reader {
 	/* Data used by both reader and synchronize_rcu() */
+	//这个变量的深层目的是？
 	unsigned long ctr;
 	char need_mb;
 	/* Data used for registry */
-	struct cds_list_head node __attribute__((aligned(CAA_CACHE_LINE_SIZE)));
+	struct cds_list_head node __attribute__((aligned(CAA_CACHE_LINE_SIZE)));//下面的变量初始化后就纯只读了，这里防cache冲刷这些变量
 	pthread_t tid;
 	/* Reader registered flag, for internal checks. */
 	unsigned int registered:1;//标记是否已注册
@@ -181,12 +182,13 @@ static inline enum rcu_state rcu_reader_state(unsigned long *ctr)
 	 * Make sure both tests below are done on the same version of *value
 	 * to insure consistency.
 	 */
-	v = CMM_LOAD_SHARED(*ctr);
+	v = CMM_LOAD_SHARED(*ctr);//取ctr的值
 	if (!(v & RCU_GP_CTR_NEST_MASK))
+		//未被加锁
 		return RCU_READER_INACTIVE;
 	if (!((v ^ rcu_gp.ctr) & RCU_GP_CTR_PHASE))
-		return RCU_READER_ACTIVE_CURRENT;
-	return RCU_READER_ACTIVE_OLD;
+		return RCU_READER_ACTIVE_CURRENT;//加锁了，且加锁时与rcu_gp上的RCU_GP_CTR_PHASE一致，说明自上次变更到现在还没有解锁
+	return RCU_READER_ACTIVE_OLD;//加锁了，但自上次变更到现在还没解锁（与当前rcu_gp上的RCU_GP_CTR_PHASE不一致）
 }
 
 /*
@@ -199,9 +201,11 @@ static inline enum rcu_state rcu_reader_state(unsigned long *ctr)
 static inline void _rcu_read_lock_update(unsigned long tmp)
 {
 	if (caa_likely(!(tmp & RCU_GP_CTR_NEST_MASK))) {
+		//当tmp为０时使rcu_reader.ctr等于rcu_gp.ctr
 		_CMM_STORE_SHARED(URCU_TLS(rcu_reader).ctr, _CMM_LOAD_SHARED(rcu_gp.ctr));
-		smp_mb_slave();
+		smp_mb_slave();//确保写不乱序
 	} else
+		//设置URCU_TLS(rcu_reader).ctr　= tmp + RCU_GP_COUNT（１）
 		_CMM_STORE_SHARED(URCU_TLS(rcu_reader).ctr, tmp + RCU_GP_COUNT);
 }
 
@@ -221,11 +225,13 @@ static inline void _rcu_read_lock(void)
 
 	//断言当前线程已注册
 	urcu_assert(URCU_TLS(rcu_reader).registered);
-	//要求编译器不得优化合并下面代码
+	//要求编译器单独优化其上下的代码
 	cmm_barrier();
 	//取ctr副本，并校验未打上RCU_GP_CTR_NEST_MASK标记
 	tmp = URCU_TLS(rcu_reader).ctr;
+	//不容许nest过多层
 	urcu_assert((tmp & RCU_GP_CTR_NEST_MASK) != RCU_GP_CTR_NEST_MASK);
+	//如果tmp为０，则使ctr＝rcu_gp.ctr,否则ctr在tmp的基础上自增１
 	_rcu_read_lock_update(tmp);
 }
 
@@ -240,11 +246,14 @@ static inline void _rcu_read_lock(void)
 static inline void _rcu_read_unlock_update_and_wakeup(unsigned long tmp)
 {
 	if (caa_likely((tmp & RCU_GP_CTR_NEST_MASK) == RCU_GP_COUNT)) {
+		//未nest的解锁，通过减去RCU_GP_COUNT使其归于０
 		smp_mb_slave();
 		_CMM_STORE_SHARED(URCU_TLS(rcu_reader).ctr, tmp - RCU_GP_COUNT);
 		smp_mb_slave();
+		//唤醒等待的更新者
 		wake_up_gp();
 	} else
+		//存在nest的解锁，仅使其减１
 		_CMM_STORE_SHARED(URCU_TLS(rcu_reader).ctr, tmp - RCU_GP_COUNT);
 }
 
@@ -257,8 +266,11 @@ static inline void _rcu_read_unlock(void)
 {
 	unsigned long tmp;
 
+	//断言线程已注册
 	urcu_assert(URCU_TLS(rcu_reader).registered);
+	//取本线程ctr
 	tmp = URCU_TLS(rcu_reader).ctr;
+	//断言tmp一定不为０（如果等于０，则存在未加锁即解锁的情况）
 	urcu_assert(tmp & RCU_GP_CTR_NEST_MASK);
 	_rcu_read_unlock_update_and_wakeup(tmp);
 	cmm_barrier();	/* Ensure the compiler does not reorder us with mutex */

@@ -89,6 +89,7 @@ static inline void ___cds_wfs_init(struct __cds_wfs_stack *s)
  * cds_wfs_init: initialize wait-free stack. Pair with
  * cds_wfs_destroy().
  */
+//使栈指向END，初始化锁
 static inline
 void _cds_wfs_init(struct cds_wfs_stack *s)
 {
@@ -110,6 +111,7 @@ void _cds_wfs_destroy(struct cds_wfs_stack *s)
 	assert(!ret);
 }
 
+//检查node是否为栈底元素
 static inline bool ___cds_wfs_end(void *node)
 {
 	return node == CDS_WFS_END;
@@ -136,6 +138,7 @@ static inline bool _cds_wfs_empty(cds_wfs_stack_ptr_t u_stack)
  * Returns 0 if the stack was empty prior to adding the node.
  * Returns non-zero otherwise.
  */
+//元素进栈（不加锁）如果返回０表示在添加之前栈是空的，否则为非０
 static inline
 int _cds_wfs_push(cds_wfs_stack_ptr_t u_stack, struct cds_wfs_node *node)
 {
@@ -149,11 +152,13 @@ int _cds_wfs_push(cds_wfs_stack_ptr_t u_stack, struct cds_wfs_node *node)
 	 * uatomic_xchg() implicit memory barrier orders earlier stores
 	 * to node (setting it to NULL) before publication.
 	 */
+	//将新添加的元素放在栈顶（采用原子操作）
 	old_head = uatomic_xchg(&s->head, new_head);
 	/*
 	 * At this point, dequeuers see a NULL node->next, they should
 	 * busy-wait until node->next is set to old_head.
 	 */
+	//将旧的栈顶元素链在新添加的元素后面，保证可访问。
 	CMM_STORE_SHARED(node->next, &old_head->node);
 	return !___cds_wfs_end(old_head);
 }
@@ -172,11 +177,14 @@ ___cds_wfs_node_sync_next(struct cds_wfs_node *node, int blocking)
 	 */
 	while ((next = CMM_LOAD_SHARED(node->next)) == NULL) {
 		if (!blocking)
+			//不许阻塞，但栈为空，返回CDS_WFS_WOULDBLOCK
 			return CDS_WFS_WOULDBLOCK;
 		if (++attempt >= CDS_WFS_ADAPT_ATTEMPTS) {
+			//出队尝试过多，sleep会
 			(void) poll(NULL, 0, CDS_WFS_WAIT);	/* Wait for 10ms */
 			attempt = 0;
 		} else {
+			//通过nop让出cpu
 			caa_cpu_relax();
 		}
 	}
@@ -184,6 +192,7 @@ ___cds_wfs_node_sync_next(struct cds_wfs_node *node, int blocking)
 	return next;
 }
 
+//支持阻塞pop,非阻塞pop
 static inline
 struct cds_wfs_node *
 ___cds_wfs_pop(cds_wfs_stack_ptr_t u_stack, int *state, int blocking)
@@ -197,18 +206,21 @@ ___cds_wfs_pop(cds_wfs_stack_ptr_t u_stack, int *state, int blocking)
 	for (;;) {
 		head = CMM_LOAD_SHARED(s->head);
 		if (___cds_wfs_end(head)) {
+			//栈为空，不能弹出，返回NULL
 			return NULL;
 		}
 		next = ___cds_wfs_node_sync_next(&head->node, blocking);
 		if (!blocking && next == CDS_WFS_WOULDBLOCK) {
-			return CDS_WFS_WOULDBLOCK;
+			return CDS_WFS_WOULDBLOCK;//非阻塞情况处理
 		}
+		//弹出head->node,更新栈顶为head->node的next(原子更新）
 		new_head = caa_container_of(next, struct cds_wfs_head, node);
 		if (uatomic_cmpxchg(&s->head, head, new_head) == head) {
 			if (state && ___cds_wfs_end(new_head))
 				*state |= CDS_WFS_STATE_LAST;
 			return &head->node;
 		}
+		//更新失败，检查如果非阻塞，则直接退出竞争（防止长时间竞争）
 		if (!blocking) {
 			return CDS_WFS_WOULDBLOCK;
 		}
@@ -238,6 +250,7 @@ static inline
 struct cds_wfs_node *
 ___cds_wfs_pop_with_state_blocking(cds_wfs_stack_ptr_t u_stack, int *state)
 {
+	//阻塞pop
 	return ___cds_wfs_pop(u_stack, state, 1);
 }
 
@@ -245,6 +258,7 @@ static inline
 struct cds_wfs_node *
 ___cds_wfs_pop_blocking(cds_wfs_stack_ptr_t u_stack)
 {
+	//阻塞pop
 	return ___cds_wfs_pop_with_state_blocking(u_stack, NULL);
 }
 
@@ -260,6 +274,7 @@ static inline
 struct cds_wfs_node *
 ___cds_wfs_pop_with_state_nonblocking(cds_wfs_stack_ptr_t u_stack, int *state)
 {
+	//非阻塞pop
 	return ___cds_wfs_pop(u_stack, state, 0);
 }
 
@@ -273,6 +288,7 @@ static inline
 struct cds_wfs_node *
 ___cds_wfs_pop_nonblocking(cds_wfs_stack_ptr_t u_stack)
 {
+	//非阻塞pop
 	return ___cds_wfs_pop_with_state_nonblocking(u_stack, NULL);
 }
 
@@ -297,6 +313,7 @@ static inline
 struct cds_wfs_head *
 ___cds_wfs_pop_all(cds_wfs_stack_ptr_t u_stack)
 {
+	//由于实现为链式栈，，所以通过一个指针赋值，即可完成pop_all
 	struct __cds_wfs_stack *s = u_stack._s;
 	struct cds_wfs_head *head;
 
@@ -310,15 +327,16 @@ ___cds_wfs_pop_all(cds_wfs_stack_ptr_t u_stack)
 	 * taking care to order writes to each node prior to the full
 	 * memory barrier after this uatomic_xchg().
 	 */
-	head = uatomic_xchg(&s->head, CDS_WFS_END);
+	head = uatomic_xchg(&s->head, CDS_WFS_END);//原子操作
 	if (___cds_wfs_end(head))
 		return NULL;
-	return head;
+	return head;//注：最后一个元素为CDS_WFS_END
 }
 
 /*
  * cds_wfs_pop_lock: lock stack pop-protection mutex.
  */
+//pop加锁
 static inline void _cds_wfs_pop_lock(struct cds_wfs_stack *s)
 {
 	int ret;
@@ -330,6 +348,7 @@ static inline void _cds_wfs_pop_lock(struct cds_wfs_stack *s)
 /*
  * cds_wfs_pop_unlock: unlock stack pop-protection mutex.
  */
+//pop解锁
 static inline void _cds_wfs_pop_unlock(struct cds_wfs_stack *s)
 {
 	int ret;
@@ -347,6 +366,7 @@ _cds_wfs_pop_with_state_blocking(struct cds_wfs_stack *s, int *state)
 {
 	struct cds_wfs_node *retnode;
 
+	//通过加锁保证并发出队的互斥（阻塞出栈）
 	_cds_wfs_pop_lock(s);
 	retnode = ___cds_wfs_pop_with_state_blocking(s, state);
 	_cds_wfs_pop_unlock(s);
@@ -360,12 +380,14 @@ static inline
 struct cds_wfs_node *
 _cds_wfs_pop_blocking(struct cds_wfs_stack *s)
 {
+	//阻塞出栈
 	return _cds_wfs_pop_with_state_blocking(s, NULL);
 }
 
 /*
  * Call __cds_wfs_pop_all with an internal pop mutex held.
  */
+//加锁实现全部弹栈
 static inline
 struct cds_wfs_head *
 _cds_wfs_pop_all_blocking(struct cds_wfs_stack *s)
@@ -390,6 +412,7 @@ _cds_wfs_pop_all_blocking(struct cds_wfs_stack *s)
  *
  * Returns NULL if popped stack is empty, top stack node otherwise.
  */
+//查看栈顶元素
 static inline struct cds_wfs_node *
 _cds_wfs_first(struct cds_wfs_head *head)
 {
@@ -398,6 +421,7 @@ _cds_wfs_first(struct cds_wfs_head *head)
 	return &head->node;
 }
 
+//取node的下一个元素（可阻塞，封装处理CSD_WFS_END情况）
 static inline struct cds_wfs_node *
 ___cds_wfs_next(struct cds_wfs_node *node, int blocking)
 {
@@ -430,6 +454,7 @@ ___cds_wfs_next(struct cds_wfs_node *node, int blocking)
 static inline struct cds_wfs_node *
 _cds_wfs_next_blocking(struct cds_wfs_node *node)
 {
+	//阻塞取node->next
 	return ___cds_wfs_next(node, 1);
 }
 
@@ -443,6 +468,7 @@ _cds_wfs_next_blocking(struct cds_wfs_node *node)
 static inline struct cds_wfs_node *
 _cds_wfs_next_nonblocking(struct cds_wfs_node *node)
 {
+	//非阻塞取node->next
 	return ___cds_wfs_next(node, 0);
 }
 

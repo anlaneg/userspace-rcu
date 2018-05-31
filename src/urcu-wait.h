@@ -44,6 +44,7 @@ enum urcu_wait_state {
 
 struct urcu_wait_node {
 	struct cds_wfs_node node;
+	//wait节点的状态
 	int32_t state;	/* enum urcu_wait_state */
 };
 
@@ -56,6 +57,7 @@ struct urcu_wait_node {
 #define DECLARE_URCU_WAIT_NODE(name)			\
 	struct urcu_wait_node name
 
+//等待队列（实现为含锁的栈）
 struct urcu_wait_queue {
 	struct cds_wfs_stack stack;
 };
@@ -66,6 +68,7 @@ struct urcu_wait_queue {
 #define DECLARE_URCU_WAIT_QUEUE(name)			\
 	struct urcu_wait_queue name
 
+//初始化队列，初始化队列的锁
 #define DEFINE_URCU_WAIT_QUEUE(name)			\
 	struct urcu_wait_queue name = URCU_WAIT_QUEUE_HEAD_INIT(name)
 
@@ -78,6 +81,7 @@ struct urcu_waiters {
  * previously empty, else return 1.
  * A full memory barrier is issued before being added to the wait queue.
  */
+//向队列中添加一个wait_node (返回０，如果之前queue是空的;否则返回１）
 static inline
 bool urcu_wait_add(struct urcu_wait_queue *queue,
 		struct urcu_wait_node *node)
@@ -96,6 +100,7 @@ void urcu_move_waiters(struct urcu_waiters *waiters,
 	waiters->head = __cds_wfs_pop_all(&queue->stack);
 }
 
+//设置节点状态
 static inline
 void urcu_wait_set_state(struct urcu_wait_node *node,
 		enum urcu_wait_state state)
@@ -136,6 +141,7 @@ void urcu_adaptative_wake_up(struct urcu_wait_node *wait)
  * Caller must initialize "value" to URCU_WAIT_WAITING before passing its
  * memory to waker thread.
  */
+//等待wait状态变更为非waiting状态，再等待wait状态变更为URCU_WAIT_TEARDOWN状态
 static inline
 void urcu_adaptative_busy_wait(struct urcu_wait_node *wait)
 {
@@ -143,11 +149,13 @@ void urcu_adaptative_busy_wait(struct urcu_wait_node *wait)
 
 	/* Load and test condition before read state */
 	cmm_smp_rmb();
+	//多次尝试等待wait状态变更为非waiting
 	for (i = 0; i < URCU_WAIT_ATTEMPTS; i++) {
 		if (uatomic_read(&wait->state) != URCU_WAIT_WAITING)
 			goto skip_futex_wait;
 		caa_cpu_relax();
 	}
+	//乐观等待wait->state变更失败，采用futex系统调用等待
 	while (futex_noasync(&wait->state, FUTEX_WAIT, URCU_WAIT_WAITING,
 			NULL, NULL, 0)) {
 		switch (errno) {
@@ -163,21 +171,27 @@ void urcu_adaptative_busy_wait(struct urcu_wait_node *wait)
 		}
 	}
 skip_futex_wait:
+	//wait->state已变更为非waiting状态
 
 	/* Tell waker thread than we are running. */
+	//为state加上running标记
 	uatomic_or(&wait->state, URCU_WAIT_RUNNING);
 
 	/*
 	 * Wait until waker thread lets us know it's ok to tear down
 	 * memory allocated for struct urcu_wait.
 	 */
+	//等待wait->state变更为teardown状态
+	//先乐观等待N次
 	for (i = 0; i < URCU_WAIT_ATTEMPTS; i++) {
 		if (uatomic_read(&wait->state) & URCU_WAIT_TEARDOWN)
 			break;
 		caa_cpu_relax();
 	}
+	//N次中没有等到，采用poll进行阻塞等待
 	while (!(uatomic_read(&wait->state) & URCU_WAIT_TEARDOWN))
 		poll(NULL, 0, 10);
+	//断言
 	assert(uatomic_read(&wait->state) & URCU_WAIT_TEARDOWN);
 }
 

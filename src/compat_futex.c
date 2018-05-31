@@ -50,7 +50,7 @@ pthread_cond_t __urcu_compat_futex_cond = PTHREAD_COND_INITIALIZER;
  * For now, timeout, uaddr2 and val3 are unused.
  * Waiter will relinquish the CPU until woken up.
  */
-
+//实现非异步的futex函数
 int compat_futex_noasync(int32_t *uaddr, int op, int32_t val,
 	const struct timespec *timeout, int32_t *uaddr2, int32_t val3)
 {
@@ -82,6 +82,7 @@ int compat_futex_noasync(int32_t *uaddr, int op, int32_t val,
 		 * Comparing *uaddr content against val figures out which
 		 * thread has been awakened.
 		 */
+		//如果*uaddr等于val，则阻塞
 		while (CMM_LOAD_SHARED(*uaddr) == val)
 			pthread_cond_wait(&__urcu_compat_futex_cond,
 				&__urcu_compat_futex_lock);
@@ -92,12 +93,14 @@ int compat_futex_noasync(int32_t *uaddr, int op, int32_t val,
 		 * all awaiting threads, independently of their respective
 		 * uaddr.
 		 */
+		//唤醒其它线程
 		pthread_cond_broadcast(&__urcu_compat_futex_cond);
 		break;
 	default:
 		errno = EINVAL;
 		ret = -1;
 	}
+	//完成解锁
 	lockret = pthread_mutex_unlock(&__urcu_compat_futex_lock);
 	if (lockret) {
 		errno = lockret;
@@ -135,6 +138,7 @@ int compat_futex_async(int32_t *uaddr, int op, int32_t val,
 
 	switch (op) {
 	case FUTEX_WAIT:
+		//如果*uaddr为val，则阻塞并等待
 		while (CMM_LOAD_SHARED(*uaddr) == val) {
 			if (poll(NULL, 0, 10) < 0) {
 				ret = -1;
@@ -144,7 +148,7 @@ int compat_futex_async(int32_t *uaddr, int op, int32_t val,
 		}
 		break;
 	case FUTEX_WAKE:
-		break;
+		break;//直接退出（不需要知会，其它线程会检查出来）
 	default:
 		errno = EINVAL;
 		ret = -1;

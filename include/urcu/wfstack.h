@@ -84,11 +84,11 @@ struct cds_wfs_head {
 };
 
 struct __cds_wfs_stack {
-	struct cds_wfs_head *head;
+	struct cds_wfs_head *head;//无锁栈顶指针（采用链栈方式实现）
 };
 
 struct cds_wfs_stack {
-	struct cds_wfs_head *head;
+	struct cds_wfs_head *head;//栈顶指针（采用链栈方式实现）
 	pthread_mutex_t lock;
 };
 

@@ -59,6 +59,7 @@ bool cds_wfcq_empty(cds_wfcq_head_ptr_t head,
 	return _cds_wfcq_empty(head, tail);
 }
 
+//此函数不支持并发
 bool cds_wfcq_enqueue(cds_wfcq_head_ptr_t head,
 		struct cds_wfcq_tail *tail,
 		struct cds_wfcq_node *node)

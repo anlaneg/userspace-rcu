@@ -59,6 +59,7 @@ extern int compat_futex_async(int32_t *uaddr, int op, int32_t val,
 #include <urcu/compiler.h>
 #include <urcu/arch.h>
 
+//封装futex系统调用
 static inline int futex(int32_t *uaddr, int op, int32_t val,
 		const struct timespec *timeout, int32_t *uaddr2, int32_t val3)
 {
@@ -73,6 +74,7 @@ static inline int futex_noasync(int32_t *uaddr, int op, int32_t val,
 
 	ret = futex(uaddr, op, val, timeout, uaddr2, val3);
 	if (caa_unlikely(ret < 0 && errno == ENOSYS)) {
+		//系统调用失败时，以compat_futex_async来替代它
 		/*
 		 * The fallback on ENOSYS is the async-safe version of
 		 * the compat futex implementation, because the
@@ -96,6 +98,7 @@ static inline int futex_async(int32_t *uaddr, int op, int32_t val,
 
 	ret = futex(uaddr, op, val, timeout, uaddr2, val3);
 	if (caa_unlikely(ret < 0 && errno == ENOSYS)) {
+		//系统调用失败时，以compat_futex_async来替代它
 		return compat_futex_async(uaddr, op, val, timeout,
 				uaddr2, val3);
 	}

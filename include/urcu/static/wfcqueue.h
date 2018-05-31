@@ -533,6 +533,7 @@ ___cds_wfcq_dequeue_nonblocking(cds_wfcq_head_ptr_t head,
  * Returns enum cds_wfcq_ret which indicates the state of the src or
  * dest queue.
  */
+//实现将src_q_head内容与dst_q_head内容连接（dst_q_head内容在前面）--支持可阻塞
 static inline enum cds_wfcq_ret
 ___cds_wfcq_splice(
 		cds_wfcq_head_ptr_t u_dest_q_head,
@@ -563,10 +564,11 @@ ___cds_wfcq_splice(
 		//自src_q_head中摘下list
 		head = uatomic_xchg(&src_q_head->node.next, NULL);
 		if (head)
-			break;	/* non-empty */
+			break;	/* non-empty */　//源队列元素非空，返回
 		if (CMM_LOAD_SHARED(src_q_tail->p) == &src_q_head->node)
 			return CDS_WFCQ_RET_SRC_EMPTY;//再次检查src_q_head为空
 		if (___cds_wfcq_busy_wait(&attempt, blocking))
+			//尝试等待后重启（不支持阻塞时，直接返回CDS_WFCQ_RET_WOULDBLOCK）
 			return CDS_WFCQ_RET_WOULDBLOCK;
 	}
 
@@ -576,12 +578,14 @@ ___cds_wfcq_splice(
 	 * concurrent enqueue on src_q, which exchanges the tail before
 	 * updating the previous tail's next pointer.
 	 */
+	//由于src_q_head已被置空，这里更新src_q_tail,并返回tail旧值
 	tail = uatomic_xchg(&src_q_tail->p, &src_q_head->node);
 
 	/*
 	 * Append the spliced content of src_q into dest_q. Does not
 	 * require mutual exclusion on dest_q (wait-free).
 	 */
+	//将head添加到dst_q_head后面
 	if (___cds_wfcq_append(__cds_wfcq_head_cast(dest_q_head), dest_q_tail,
 			head, tail))
 		return CDS_WFCQ_RET_DEST_NON_EMPTY;
@@ -606,6 +610,7 @@ ___cds_wfcq_splice_blocking(
 		cds_wfcq_head_ptr_t src_q_head,
 		struct cds_wfcq_tail *src_q_tail)
 {
+	//阻塞合并两个链表
 	return ___cds_wfcq_splice(dest_q_head, dest_q_tail,
 		src_q_head, src_q_tail, 1);
 }
@@ -623,6 +628,7 @@ ___cds_wfcq_splice_nonblocking(
 		cds_wfcq_head_ptr_t src_q_head,
 		struct cds_wfcq_tail *src_q_tail)
 {
+	//非阻塞合并两个链表
 	return ___cds_wfcq_splice(dest_q_head, dest_q_tail,
 		src_q_head, src_q_tail, 0);
 }
@@ -642,6 +648,7 @@ _cds_wfcq_dequeue_with_state_blocking(struct cds_wfcq_head *head,
 {
 	struct cds_wfcq_node *retval;
 
+	//阻塞出队（需加锁）
 	_cds_wfcq_dequeue_lock(head, tail);
 	retval = ___cds_wfcq_dequeue_with_state_blocking(cds_wfcq_head_cast(head),
 			tail, state);
@@ -682,6 +689,7 @@ _cds_wfcq_splice_blocking(
 {
 	enum cds_wfcq_ret ret;
 
+	//加锁阻塞合并
 	_cds_wfcq_dequeue_lock(src_q_head, src_q_tail);
 	ret = ___cds_wfcq_splice_blocking(cds_wfcq_head_cast(dest_q_head), dest_q_tail,
 			cds_wfcq_head_cast(src_q_head), src_q_tail);

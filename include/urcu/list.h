@@ -121,6 +121,7 @@ void cds_list_splice(struct cds_list_head *add, struct cds_list_head *head)
 }
 
 /* Get typed element from list at a given position. */
+//将ptr指针换算成type类型的指针
 #define cds_list_entry(ptr, type, member) \
 	((type *) ((char *) (ptr) - (unsigned long) (&((type *) 0)->member)))
 
@@ -165,6 +166,7 @@ void cds_list_splice(struct cds_list_head *add, struct cds_list_head *head)
 		&pos->member != (head); \
 		pos = cds_list_entry(pos->member.prev, __typeof__(*pos), member))
 
+//安全遍历head链（支持对pos进行删除）
 #define cds_list_for_each_entry_safe(pos, p, head, member) \
 	for (pos = cds_list_entry((head)->next, __typeof__(*pos), member), \
 			p = cds_list_entry(pos->member.next, __typeof__(*pos), member); \

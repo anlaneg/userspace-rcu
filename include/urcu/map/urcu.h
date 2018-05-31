@@ -43,20 +43,24 @@
 //读加锁
 #define rcu_read_lock			rcu_read_lock_memb
 #define _rcu_read_lock			_rcu_read_lock_memb
+
 //读解锁
 #define rcu_read_unlock			rcu_read_unlock_memb
 #define _rcu_read_unlock		_rcu_read_unlock_memb
 
 #define rcu_read_ongoing		rcu_read_ongoing_memb
 #define _rcu_read_ongoing		_rcu_read_ongoing_memb
+
 //实现当前rcu线程的注册
 #define rcu_register_thread		rcu_register_thread_memb
+
 //解除当前rcu线程的注册
 #define rcu_unregister_thread		rcu_unregister_thread_memb
 
 //rcu系统初始化
 #define rcu_init			rcu_init_memb
 #define rcu_exit			rcu_exit_memb
+//同步等待修改生效
 #define synchronize_rcu			synchronize_rcu_memb
 #define rcu_reader			rcu_reader_memb
 #define rcu_gp				rcu_gp_memb
@@ -66,6 +70,8 @@
 #define create_call_rcu_data		create_call_rcu_data_memb
 #define set_cpu_call_rcu_data		set_cpu_call_rcu_data_memb
 #define get_default_call_rcu_data	get_default_call_rcu_data_memb
+
+//取rcu各线程私有数据
 #define get_call_rcu_data		get_call_rcu_data_memb
 #define get_thread_call_rcu_data	get_thread_call_rcu_data_memb
 #define set_thread_call_rcu_data	set_thread_call_rcu_data_memb

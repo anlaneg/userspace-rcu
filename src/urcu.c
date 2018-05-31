@@ -65,6 +65,7 @@
 #define RCU_QS_ACTIVE_ATTEMPTS 100
 
 /* If the headers do not support membarrier system call, fall back on RCU_MB */
+//如果不支持membarrier系统调用，则失败
 #ifdef __NR_membarrier
 # define membarrier(...)		syscall(__NR_membarrier, __VA_ARGS__)
 #else
@@ -136,6 +137,7 @@ static CDS_LIST_HEAD(registry);
  */
 static DEFINE_URCU_WAIT_QUEUE(gp_waiters);
 
+//加互斥锁
 static void mutex_lock(pthread_mutex_t *mutex)
 {
 	int ret;
@@ -145,6 +147,7 @@ static void mutex_lock(pthread_mutex_t *mutex)
 	if (ret)
 		urcu_die(ret);
 #else /* #ifndef DISTRUST_SIGNALS_EXTREME */
+	//采用trylock,进行周期性控测
 	while ((ret = pthread_mutex_trylock(mutex)) != 0) {
 		if (ret != EBUSY && ret != EINTR)
 			urcu_die(ret);
@@ -158,6 +161,7 @@ static void mutex_lock(pthread_mutex_t *mutex)
 #endif /* #else #ifndef DISTRUST_SIGNALS_EXTREME */
 }
 
+//解互斥锁
 static void mutex_unlock(pthread_mutex_t *mutex)
 {
 	int ret;
@@ -242,6 +246,7 @@ static void smp_mb_master(void)
  * Always called with rcu_registry lock held. Releases this lock and
  * grabs it again. Holds the lock when it returns.
  */
+//阻塞等待rcu_gp.futex变更为非－1
 static void wait_gp(void)
 {
 	/*
@@ -253,7 +258,8 @@ static void wait_gp(void)
 	/* Temporarily unlock the registry lock. */
 	mutex_unlock(&rcu_registry_lock);
 	if (uatomic_read(&rcu_gp.futex) != -1)
-		goto end;
+		goto end;//加锁后再尝试一次，不巧命中了，跳出
+	//阻塞等待rcu_gp.futex变更成非－1情况
 	while (futex_async(&rcu_gp.futex, FUTEX_WAIT, -1,
 			NULL, NULL, 0)) {
 		switch (errno) {
@@ -296,23 +302,27 @@ static void wait_for_readers(struct cds_list_head *input_readers,
 	 */
 	for (;;) {
 		if (wait_loops < RCU_QS_ACTIVE_ATTEMPTS)
-			wait_loops++;
+			wait_loops++;//未超上限情况下，忙等
 		if (wait_loops >= RCU_QS_ACTIVE_ATTEMPTS) {
-			uatomic_dec(&rcu_gp.futex);
+			uatomic_dec(&rcu_gp.futex);//忙等数量超上限时，减少rcu_gp.futex
 			/* Write futex before read reader_gp */
 			smp_mb_master();
 		}
 
+		//遍历input_readers,每个元素为index,临时元素为tmp(index下一个元素）
 		cds_list_for_each_entry_safe(index, tmp, input_readers, node) {
 			switch (rcu_reader_state(&index->ctr)) {
 			case RCU_READER_ACTIVE_CURRENT:
 				if (cur_snap_readers) {
+					//如果传入了cur_snap_readers,将index->node自input_readers链上摘下来，并将其加入到
+					//cur_snap_readers链上
 					cds_list_move(&index->node,
 						cur_snap_readers);
 					break;
 				}
 				/* Fall-through */
 			case RCU_READER_INACTIVE:
+				//将index自input_readers链上摘下来，并将其加入到qsreaders链上
 				cds_list_move(&index->node, qsreaders);
 				break;
 			case RCU_READER_ACTIVE_OLD:
@@ -328,6 +338,7 @@ static void wait_for_readers(struct cds_list_head *input_readers,
 
 #ifndef HAS_INCOHERENT_CACHES
 		if (cds_list_empty(input_readers)) {
+			//input_readers已被更新为空
 			if (wait_loops >= RCU_QS_ACTIVE_ATTEMPTS) {
 				/* Read reader_gp before write futex */
 				smp_mb_master();
@@ -337,7 +348,7 @@ static void wait_for_readers(struct cds_list_head *input_readers,
 		} else {
 			if (wait_loops >= RCU_QS_ACTIVE_ATTEMPTS) {
 				/* wait_gp unlocks/locks registry lock. */
-				wait_gp();
+				wait_gp();//阻塞等待gp.futex变更
 			} else {
 				/* Temporarily unlock the registry lock. */
 				mutex_unlock(&rcu_registry_lock);
@@ -390,6 +401,7 @@ void synchronize_rcu(void)
 {
 	CDS_LIST_HEAD(cur_snap_readers);
 	CDS_LIST_HEAD(qsreaders);
+	//定义wait,并置为waiting状态
 	DEFINE_URCU_WAIT_NODE(wait, URCU_WAIT_WAITING);
 	struct urcu_waiters waiters;
 
@@ -401,14 +413,19 @@ void synchronize_rcu(void)
 	 * orders prior memory accesses of threads put into the wait
 	 * queue before their insertion into the wait queue.
 	 */
+	//XXX 此代码在多线程时有问题（故只能有一个进入）
+	//将wait添加进gp_waiters中
 	if (urcu_wait_add(&gp_waiters, &wait) != 0) {
+		//在wait加入时，gp_waiters中已存在元素，本次非首次加入,我们等待另一个线程处理此wait
 		/* Not first in queue: will be awakened by another thread. */
+		//等待wait被处理
 		urcu_adaptative_busy_wait(&wait);
 		/* Order following memory accesses after grace period. */
 		cmm_smp_mb();
 		return;
 	}
 	/* We won't need to wake ourself up */
+	//由于我们是第一个，故我们处理此wait(先将wait置为running)
 	urcu_wait_set_state(&wait, URCU_WAIT_RUNNING);
 
 	mutex_lock(&rcu_gp_lock);
@@ -416,15 +433,17 @@ void synchronize_rcu(void)
 	/*
 	 * Move all waiters into our local queue.
 	 */
+	//弹出gp_waiters栈中所有元素到waiters
 	urcu_move_waiters(&waiters, &gp_waiters);
 
 	mutex_lock(&rcu_registry_lock);
 
+	//如无注册的线程，则退出，无法处理
 	if (cds_list_empty(&registry))
 		goto out;
 
 	/*
-	 * All threads should read qparity before accessing data structure
+	 * All threads should read parity before accessing data structure
 	 * where new ptr points to. Must be done within rcu_registry_lock
 	 * because it iterates on reader threads.
 	 */
@@ -436,6 +455,7 @@ void synchronize_rcu(void)
 	 * wait_for_readers() can release and grab again rcu_registry_lock
 	 * interally.
 	 */
+	//遍历每个rcu线程，将未加锁的放入到qsreaders;将在本阶段内加锁的加入到cur_snap_readers中
 	wait_for_readers(&registry, &cur_snap_readers, &qsreaders);
 
 	/*
@@ -455,7 +475,7 @@ void synchronize_rcu(void)
 	cmm_smp_mb();
 
 	/* Switch parity: 0 -> 1, 1 -> 0 */
-	CMM_STORE_SHARED(rcu_gp.ctr, rcu_gp.ctr ^ RCU_GP_CTR_PHASE);
+	CMM_STORE_SHARED(rcu_gp.ctr, rcu_gp.ctr ^ RCU_GP_CTR_PHASE);//如果已有PHASE标记，则清除，如果没有PHASE标记，则添加
 
 	/*
 	 * Must commit rcu_gp.ctr update to memory before waiting for quiescent
@@ -478,11 +498,13 @@ void synchronize_rcu(void)
 	 * wait_for_readers() can release and grab again rcu_registry_lock
 	 * interally.
 	 */
+	//清标记后再检查一遍cur_snap_readers,
 	wait_for_readers(&cur_snap_readers, NULL, &qsreaders);
 
 	/*
 	 * Put quiescent reader list back into registry.
 	 */
+	//将qsreaders加入到registry中
 	cds_list_splice(&qsreaders, &registry);
 
 	/*

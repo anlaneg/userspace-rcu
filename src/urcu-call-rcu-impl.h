@@ -61,6 +61,7 @@ struct call_rcu_data {
 	struct cds_wfcq_head cbs_head;
 	unsigned long flags;
 	int32_t futex;
+	//cbs_head队列长度
 	unsigned long qlen; /* maintained for debugging. */
 	pthread_t tid;
 	int cpu_affinity;
@@ -270,6 +271,7 @@ static void call_rcu_wake_up(struct call_rcu_data *crdp)
 	cmm_smp_mb();
 	if (caa_unlikely(uatomic_read(&crdp->futex) == -1)) {
 		uatomic_set(&crdp->futex, 0);
+		//知会其它线程已有元素入队
 		if (futex_async(&crdp->futex, FUTEX_WAKE, 1,
 				NULL, NULL, 0) < 0)
 			urcu_die(errno);
@@ -325,6 +327,7 @@ static void *call_rcu_thread(void *arg)
 	/*
 	 * If callbacks take a read-side lock, we need to be registered.
 	 */
+	//注册rcu线程
 	rcu_register_thread();
 
 	URCU_TLS(thread_call_rcu_data) = crdp;//为当前线程设置crdp
@@ -350,22 +353,28 @@ static void *call_rcu_thread(void *arg)
 			 * process any callback. The callback lists may
 			 * still be non-empty though.
 			 */
-			rcu_unregister_thread();
+			rcu_unregister_thread();//解注册
 			cmm_smp_mb__before_uatomic_or();//防编译器优化
-			uatomic_or(&crdp->flags, URCU_CALL_RCU_PAUSED);//原子or操作
+			uatomic_or(&crdp->flags, URCU_CALL_RCU_PAUSED);//原子or操作，置为paused标记
+
+			//阻塞等待包含RCU_PAUSE标记
 			while ((uatomic_read(&crdp->flags) & URCU_CALL_RCU_PAUSE) != 0)
-				(void) poll(NULL, 0, 1);//延迟1ms
-			uatomic_and(&crdp->flags, ~URCU_CALL_RCU_PAUSED);//原子and操作
+				(void) poll(NULL, 0, 1);
+			//清除掉paused标记，重新注册
+			uatomic_and(&crdp->flags, ~URCU_CALL_RCU_PAUSED);
 			cmm_smp_mb__after_uatomic_and();//防编译器优化
 			rcu_register_thread();
 		}
 
+		//阻塞交换crdp->cbs_head上的元素
 		cds_wfcq_init(&cbs_tmp_head, &cbs_tmp_tail);
 		splice_ret = __cds_wfcq_splice_blocking(&cbs_tmp_head,
 			&cbs_tmp_tail, &crdp->cbs_head, &crdp->cbs_tail);
 		assert(splice_ret != CDS_WFCQ_RET_WOULDBLOCK);
 		assert(splice_ret != CDS_WFCQ_RET_DEST_NON_EMPTY);
+
 		if (splice_ret != CDS_WFCQ_RET_SRC_EMPTY) {
+			//自crdp->cbs_head上交换到了多个元素，遍历这些元素，并调用对应的回调
 			synchronize_rcu();
 			cbcount = 0;
 			__cds_wfcq_for_each_blocking_safe(&cbs_tmp_head,
@@ -374,15 +383,16 @@ static void *call_rcu_thread(void *arg)
 
 				rhp = caa_container_of(cbs,
 					struct rcu_head, next);
-				rhp->func(rhp);
+				rhp->func(rhp);//调用注册的回调
 				cbcount++;
 			}
-			uatomic_sub(&crdp->qlen, cbcount);
+			uatomic_sub(&crdp->qlen, cbcount);//长度清0
 		}
 		if (uatomic_read(&crdp->flags) & URCU_CALL_RCU_STOP)
 			break;
 		rcu_thread_offline();
 		if (!rt) {
+			//队列为空，等待唤醒
 			if (cds_wfcq_empty(&crdp->cbs_head,
 					&crdp->cbs_tail)) {
 				call_rcu_wait(crdp);
@@ -437,7 +447,7 @@ static void call_rcu_data_init(struct call_rcu_data **crdpp,
 	cds_list_add(&crdp->list, &call_rcu_data_list);
 	crdp->cpu_affinity = cpu_affinity;
 	crdp->gp_count = 0;
-	cmm_smp_mb();  /* Structure initialized before pointer is planted. *///防438句先执行
+	cmm_smp_mb();  /* Structure initialized before pointer is planted. *///防下一行先执行
 	*crdpp = crdp;
 	ret = pthread_create(&crdp->tid, NULL, call_rcu_thread, crdp);
 	if (ret)
@@ -659,6 +669,7 @@ int create_all_cpu_call_rcu_data(unsigned long flags)
 			call_rcu_unlock(&call_rcu_mutex);
 			continue;
 		}
+		//针对cpu$i创建rcu_data
 		crdp = __create_call_rcu_data(flags, i);
 		if (crdp == NULL) {
 			call_rcu_unlock(&call_rcu_mutex);
@@ -683,6 +694,7 @@ int create_all_cpu_call_rcu_data(unsigned long flags)
  * Wake up the call_rcu thread corresponding to the specified
  * call_rcu_data structure.
  */
+//通知rcu线程，已有元素入队，可以开始于活了。
 static void wake_call_rcu_thread(struct call_rcu_data *crdp)
 {
 	if (!(_CMM_LOAD_SHARED(crdp->flags) & URCU_CALL_RCU_RT))
@@ -693,11 +705,12 @@ static void _call_rcu(struct rcu_head *head,
 		      void (*func)(struct rcu_head *head),
 		      struct call_rcu_data *crdp)
 {
-	cds_wfcq_node_init(&head->next);
+	cds_wfcq_node_init(&head->next);//初始化head节点
 	head->func = func;//设置回调对应的函数
+	//将head加入到crdp队列中
 	cds_wfcq_enqueue(&crdp->cbs_head, &crdp->cbs_tail, &head->next);
-	uatomic_inc(&crdp->qlen);//增加callback计数
-	wake_call_rcu_thread(crdp);
+	uatomic_inc(&crdp->qlen);//增加队列长度
+	wake_call_rcu_thread(crdp);//知会其它线程自此队列上拿head并处理
 }
 
 /*
@@ -720,9 +733,11 @@ void call_rcu(struct rcu_head *head,
 	struct call_rcu_data *crdp;
 
 	/* Holding rcu read-side lock across use of per-cpu crdp */
+	//加读锁
 	_rcu_read_lock();
-	crdp = get_call_rcu_data();
+	crdp = get_call_rcu_data();//取私有数据
 	_call_rcu(head, func, crdp);
+	//解读锁
 	_rcu_read_unlock();
 }
 

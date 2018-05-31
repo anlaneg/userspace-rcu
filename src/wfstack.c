@@ -2,6 +2,7 @@
  * wfstack.c
  *
  * Userspace RCU library - Stack with wait-free push, blocking traversal.
+ * 非等待push,阻塞遍历栈(实现为链式栈）
  *
  * Copyright 2010-2012 - Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
  *
@@ -28,11 +29,13 @@
  * library wrappers to be used by non-LGPL compatible source code.
  */
 
+//栈节点初始化
 void cds_wfs_node_init(struct cds_wfs_node *node)
 {
 	_cds_wfs_node_init(node);
 }
 
+//栈初始化
 void cds_wfs_init(struct cds_wfs_stack *s)
 {
 	_cds_wfs_init(s);
@@ -53,6 +56,7 @@ bool cds_wfs_empty(cds_wfs_stack_ptr_t u_stack)
 	return _cds_wfs_empty(u_stack);
 }
 
+//压元素node到栈
 int cds_wfs_push(cds_wfs_stack_ptr_t u_stack, struct cds_wfs_node *node)
 {
 	return _cds_wfs_push(u_stack, node);
@@ -74,6 +78,7 @@ struct cds_wfs_head *cds_wfs_pop_all_blocking(struct cds_wfs_stack *s)
 	return _cds_wfs_pop_all_blocking(s);
 }
 
+//查看栈顶元素
 struct cds_wfs_node *cds_wfs_first(struct cds_wfs_head *head)
 {
 	return _cds_wfs_first(head);
@@ -99,11 +104,13 @@ void cds_wfs_pop_unlock(struct cds_wfs_stack *s)
 	_cds_wfs_pop_unlock(s);
 }
 
+//阻塞pop(不含state)
 struct cds_wfs_node *__cds_wfs_pop_blocking(cds_wfs_stack_ptr_t u_stack)
 {
 	return ___cds_wfs_pop_blocking(u_stack);
 }
 
+//阻塞pop(含state)
 struct cds_wfs_node *
 	__cds_wfs_pop_with_state_blocking(cds_wfs_stack_ptr_t u_stack,
 		int *state)
@@ -111,11 +118,13 @@ struct cds_wfs_node *
 	return ___cds_wfs_pop_with_state_blocking(u_stack, state);
 }
 
+//非阻塞弹出元素
 struct cds_wfs_node *__cds_wfs_pop_nonblocking(cds_wfs_stack_ptr_t u_stack)
 {
 	return ___cds_wfs_pop_nonblocking(u_stack);
 }
 
+//非阻塞弹出元素（含state)
 struct cds_wfs_node *
 	__cds_wfs_pop_with_state_nonblocking(cds_wfs_stack_ptr_t u_stack,
 		int *state)
@@ -123,6 +132,7 @@ struct cds_wfs_node *
 	return ___cds_wfs_pop_with_state_nonblocking(u_stack, state);
 }
 
+//弹出所有元素
 struct cds_wfs_head *__cds_wfs_pop_all(cds_wfs_stack_ptr_t u_stack)
 {
 	return ___cds_wfs_pop_all(u_stack);

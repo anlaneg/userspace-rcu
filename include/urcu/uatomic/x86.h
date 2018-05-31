@@ -298,7 +298,7 @@ void __uatomic_and(void *addr, unsigned long val, int len)
 	(__uatomic_and((addr), caa_cast_long_keep_sign(v), sizeof(*(addr))))
 
 /* uatomic_or */
-
+//原子or操作
 static inline __attribute__((always_inline))
 void __uatomic_or(void *addr, unsigned long val, int len)
 {

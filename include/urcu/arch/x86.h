@@ -33,6 +33,7 @@ extern "C" {
 
 #define CAA_CACHE_LINE_SIZE	128
 
+//fence指令存在时进入（目前cpu均支持此指令）
 #ifdef CONFIG_RCU_HAVE_FENCE
 //mfence保证系统在后面的memory访问之前，先前的memory访问都已经结束。
 #define cmm_mb()    __asm__ __volatile__ ("mfence":::"memory")
@@ -46,6 +47,7 @@ extern "C" {
 #define cmm_rmb()     __asm__ __volatile__ ("lfence":::"memory")
 //串行化发生在SFENCE指令之前的写操作但是不影响读操作。
 #define cmm_wmb()     __asm__ __volatile__ ("sfence"::: "memory")
+//全定义为防编译器优化
 #define cmm_smp_rmb() cmm_barrier()
 #define cmm_smp_wmb() cmm_barrier()
 #else
@@ -71,10 +73,12 @@ extern "C" {
 #endif
 #endif
 
+//通过执行nop释放cpu
 #define caa_cpu_relax()	__asm__ __volatile__ ("rep; nop" : : : "memory")
 
 #define HAS_CAA_GET_CYCLES
 
+//读取系统计数
 #define rdtscll(val)							  \
 	do {						  		  \
 	     unsigned int __a, __d;					  \
@@ -85,6 +89,7 @@ extern "C" {
 
 typedef uint64_t caa_cycles_t;
 
+//自cpu读取cycles数
 static inline caa_cycles_t caa_get_cycles(void)
 {
         caa_cycles_t ret = 0;
@@ -97,6 +102,7 @@ static inline caa_cycles_t caa_get_cycles(void)
  * On Linux, define the membarrier system call number if not yet available in
  * the system headers.
  */
+//linux支持membarrier系统调用，定义其对应的系通调用号
 #if (defined(__linux__) && !defined(__NR_membarrier))
 #if (CAA_BITS_PER_LONG == 32)
 #define __NR_membarrier		375

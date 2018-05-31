@@ -64,12 +64,17 @@ extern "C" {
  * handlers setup with with sigaltstack(2).
  */
 
+//当编译器支持线程局部变量时，可以省去pthread_getspecific函数，采用 __thread关键字定义
+
+//申明线程局部变量
 # define DECLARE_URCU_TLS(type, name)	\
 	CONFIG_RCU_TLS type name
 
+//定义线程局部变量
 # define DEFINE_URCU_TLS(type, name)	\
 	CONFIG_RCU_TLS type name
 
+//引用线程局部变量
 # define URCU_TLS(name)		(name)
 
 #else /* #ifndef CONFIG_RCU_TLS */
@@ -117,6 +122,7 @@ struct urcu_tls {
 		/*这句代码是否有意义？前面有if进行检查，执行器即便乱序，也在发现if预判失败后rollback*/\
 		/*存在一种情况，if预判成功，但pthread_getspecific先执行*/\
 		cmm_smp_rmb();	/* read init_done before getting key */　 \
+		/*通过pthread_getspecific来获取对应的线程私有变量*/\
 		__tls_p = pthread_getspecific(__tls_ ## name.key); \
 		if (caa_unlikely(__tls_p == NULL)) {		\
 			__tls_p = calloc(1, sizeof(type));	\
