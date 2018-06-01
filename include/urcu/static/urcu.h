@@ -162,6 +162,7 @@ extern DECLARE_URCU_TLS(struct rcu_reader, rcu_reader);
  */
 static inline void wake_up_gp(void)
 {
+	//如果rcu_gp.futex非0，则更新为0，并唤醒等待方
 	if (caa_unlikely(uatomic_read(&rcu_gp.futex) == -1)) {
 		uatomic_set(&rcu_gp.futex, 0);
 		/*

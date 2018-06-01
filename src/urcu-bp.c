@@ -134,6 +134,7 @@ static pthread_mutex_t rcu_gp_lock = PTHREAD_MUTEX_INITIALIZER;
  * on the registry.
  * rcu_registry_lock may nest inside rcu_gp_lock.
  */
+//用来保护在线程的注册，解注册，读线程情况，使这三种情况互斥
 static pthread_mutex_t rcu_registry_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static pthread_mutex_t init_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -227,17 +228,19 @@ static void wait_for_readers(struct cds_list_head *input_readers,
 
 		cds_list_for_each_entry_safe(index, tmp, input_readers, node) {
 			switch (rcu_reader_state(&index->ctr)) {
-			case RCU_READER_ACTIVE_CURRENT:
+			case RCU_READER_ACTIVE_CURRENT://在当前区间有加锁，需要等待其解锁
 				if (cur_snap_readers) {
+					//将此元素移至cur_snap_readers链上
 					cds_list_move(&index->node,
 						cur_snap_readers);
 					break;
 				}
 				/* Fall-through */
-			case RCU_READER_INACTIVE:
+			case RCU_READER_INACTIVE://在当前区间内无加锁（只是在检测期没有加锁，可能现在加锁了，故不可排除）
+				//将此元素移至qsreaders链上
 				cds_list_move(&index->node, qsreaders);
 				break;
-			case RCU_READER_ACTIVE_OLD:
+			case RCU_READER_ACTIVE_OLD://在当前区之前加锁
 				/*
 				 * Old snapshot. Leaving node in
 				 * input_readers will make us busy-loop
@@ -249,8 +252,10 @@ static void wait_for_readers(struct cds_list_head *input_readers,
 		}
 
 		if (cds_list_empty(input_readers)) {
+			//均在cur_snap_readers或者qsreaders链上
 			break;
 		} else {
+			//临时解开registry_lock，使其可注册，解注册线程
 			/* Temporarily unlock the registry lock. */
 			mutex_unlock(&rcu_registry_lock);
 			if (wait_loops >= RCU_QS_ACTIVE_ATTEMPTS)
@@ -263,6 +268,7 @@ static void wait_for_readers(struct cds_list_head *input_readers,
 	}
 }
 
+//本函数退出时，可保证所有读者均已完成锁的释放，延迟时间到。
 void synchronize_rcu(void)
 {
 	CDS_LIST_HEAD(cur_snap_readers);
@@ -270,6 +276,7 @@ void synchronize_rcu(void)
 	sigset_t newmask, oldmask;
 	int ret;
 
+	//阻塞所有信号
 	ret = sigfillset(&newmask);
 	assert(!ret);
 	ret = pthread_sigmask(SIG_BLOCK, &newmask, &oldmask);
@@ -279,6 +286,7 @@ void synchronize_rcu(void)
 
 	mutex_lock(&rcu_registry_lock);
 
+	//无注册的线程，直接退出
 	if (cds_list_empty(&registry))
 		goto out;
 
@@ -292,6 +300,10 @@ void synchronize_rcu(void)
 	 * wait_for_readers() can release and grab again rcu_registry_lock
 	 * interally.
 	 */
+	//将register划分为三类 1.registry 在上个周期加锁的
+	//				     2.cur_snap_reader 在检测时本周期加锁的
+	//                   3.qsreaders 在检测时本周期未加锁的，可能在检测后加锁，也可能没
+	//此函数退出时，要求registry为空，即保证不再存在上个周期加锁还未解锁的情况
 	wait_for_readers(&registry, &cur_snap_readers, &qsreaders);
 
 	/*
@@ -302,7 +314,8 @@ void synchronize_rcu(void)
 	cmm_smp_mb();
 
 	/* Switch parity: 0 -> 1, 1 -> 0 */
-	CMM_STORE_SHARED(rcu_gp.ctr, rcu_gp.ctr ^ RCU_GP_CTR_PHASE);//为ctr加上标记（或者清楚上原有的标记）
+	//变更周期，为ctr加上标记（或者清楚上原有的标记）
+	CMM_STORE_SHARED(rcu_gp.ctr, rcu_gp.ctr ^ RCU_GP_CTR_PHASE);
 
 	/*
 	 * Must commit qparity update to memory before waiting for other parity
@@ -323,11 +336,15 @@ void synchronize_rcu(void)
 	 * wait_for_readers() can release and grab again rcu_registry_lock
 	 * interally.
 	 */
+	//将cur_snap_readers划分为二类 1.cur_snap_reader 上次检测时，在上个周期加锁的
+	//                           2.在检测时本周期未加锁的，(可能在检测后加锁，也可能没);在本检测周期加锁的
+	//此函数退出时，要求cur_snap_reader为空，即保证不再存在上个周期加锁还未解锁的情况,
 	wait_for_readers(&cur_snap_readers, NULL, &qsreaders);
 
 	/*
 	 * Put quiescent reader list back into registry.
 	 */
+	//还原registry
 	cds_list_splice(&qsreaders, &registry);
 
 	/*
@@ -338,6 +355,7 @@ void synchronize_rcu(void)
 out:
 	mutex_unlock(&rcu_registry_lock);
 	mutex_unlock(&rcu_gp_lock);
+	//还原信号
 	ret = pthread_sigmask(SIG_SETMASK, &oldmask, NULL);
 	assert(!ret);
 }

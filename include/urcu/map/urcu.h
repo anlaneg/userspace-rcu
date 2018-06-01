@@ -60,7 +60,7 @@
 //rcu系统初始化
 #define rcu_init			rcu_init_memb
 #define rcu_exit			rcu_exit_memb
-//同步等待修改生效
+//等待可执行
 #define synchronize_rcu			synchronize_rcu_memb
 #define rcu_reader			rcu_reader_memb
 #define rcu_gp				rcu_gp_memb
@@ -77,6 +77,7 @@
 #define set_thread_call_rcu_data	set_thread_call_rcu_data_memb
 #define create_all_cpu_call_rcu_data	create_all_cpu_call_rcu_data_memb
 #define free_all_cpu_call_rcu_data	free_all_cpu_call_rcu_data_memb
+//注册rcu变更回调（回调将在合适期间被调用）
 #define call_rcu			call_rcu_memb
 #define call_rcu_data_free		call_rcu_data_free_memb
 #define call_rcu_before_fork		call_rcu_before_fork_memb

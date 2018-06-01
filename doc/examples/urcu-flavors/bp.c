@@ -104,7 +104,9 @@ int main(int argc, char **argv)
 		 * spawning any call_rcu() thread. It is slower though,
 		 * since there is no batching.
 		 */
+		//同步等待，直到所有读者均退出
 		synchronize_rcu();
+		//执行释放操作
 		free(node);
 	}
 

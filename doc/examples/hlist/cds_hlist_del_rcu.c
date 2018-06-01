@@ -56,7 +56,7 @@ int main(int argc, char **argv)
 			goto end;
 		}
 		node->value = values[i];
-		cds_hlist_add_head_rcu(&node->node, &mylist);
+		cds_hlist_add_head_rcu(&node->node, &mylist);//构造链表
 	}
 
 	/*
@@ -67,11 +67,13 @@ int main(int argc, char **argv)
 	 */
 	cds_hlist_for_each_entry_safe_2(node, n, &mylist, node) {
 		if (node->value > 0) {
+			//删除节点
 			cds_hlist_del_rcu(&node->node);
 			/*
 			 * We can only reclaim memory after a grace
 			 * period has passed after cds_hlist_del_rcu().
 			 */
+			//注册回调，在合适期间将其释放
 			call_rcu(&node->rcu_head, free_node_rcu);
 		}
 	}
@@ -80,6 +82,7 @@ int main(int argc, char **argv)
 	 * Just show the list content. This is _not_ an RCU-safe
 	 * iteration on the list.
 	 */
+	//本端已无法再看见了。
 	printf("mylist content:");
 	cds_hlist_for_each_entry_2(node, &mylist, node) {
 		printf(" %d", node->value);

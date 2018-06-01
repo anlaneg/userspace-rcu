@@ -129,10 +129,10 @@ static inline enum rcu_state rcu_reader_state(unsigned long *ctr)
 	 */
 	v = CMM_LOAD_SHARED(*ctr);
 	if (!(v & RCU_GP_CTR_NEST_MASK))
-		return RCU_READER_INACTIVE;
+		return RCU_READER_INACTIVE;//在检测时，没有加锁
 	if (!((v ^ rcu_gp.ctr) & RCU_GP_CTR_PHASE))
-		return RCU_READER_ACTIVE_CURRENT;
-	return RCU_READER_ACTIVE_OLD;
+		return RCU_READER_ACTIVE_CURRENT;//在检测时加锁了，且加锁在当前时间段内
+	return RCU_READER_ACTIVE_OLD;//加锁了，且加锁不在当前时间段内
 }
 
 /*
@@ -144,10 +144,12 @@ static inline enum rcu_state rcu_reader_state(unsigned long *ctr)
  */
 static inline void _rcu_read_lock_update(unsigned long tmp)
 {
+	//如果之前未加锁，则使其直接等于rcu_gp.ctr
 	if (caa_likely(!(tmp & RCU_GP_CTR_NEST_MASK))) {
 		_CMM_STORE_SHARED(URCU_TLS(rcu_reader)->ctr, _CMM_LOAD_SHARED(rcu_gp.ctr));
 		urcu_bp_smp_mb_slave();
 	} else
+		//如果之前已加锁，为了支持nest,使其在自身值上加1
 		_CMM_STORE_SHARED(URCU_TLS(rcu_reader)->ctr, tmp + RCU_GP_COUNT);
 }
 
@@ -165,6 +167,7 @@ static inline void _rcu_read_lock(void)
 {
 	unsigned long tmp;
 
+	//如果rcu_reader未初始化，则初始代并注册
 	if (caa_unlikely(!URCU_TLS(rcu_reader)))
 		rcu_bp_register(); /* If not yet registered. */
 	cmm_barrier();	/* Ensure the compiler does not reorder us with mutex */
@@ -186,6 +189,7 @@ static inline void _rcu_read_unlock(void)
 	urcu_assert(tmp & RCU_GP_CTR_NEST_MASK);
 	/* Finish using rcu before decrementing the pointer. */
 	urcu_bp_smp_mb_slave();
+	//解锁时，将tmp减1，解除当前level的解锁（支持nest)
 	_CMM_STORE_SHARED(URCU_TLS(rcu_reader)->ctr, tmp - RCU_GP_COUNT);
 	cmm_barrier();	/* Ensure the compiler does not reorder us with mutex */
 }

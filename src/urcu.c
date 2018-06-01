@@ -348,7 +348,7 @@ static void wait_for_readers(struct cds_list_head *input_readers,
 		} else {
 			if (wait_loops >= RCU_QS_ACTIVE_ATTEMPTS) {
 				/* wait_gp unlocks/locks registry lock. */
-				wait_gp();//阻塞等待gp.futex变更
+				wait_gp();//阻塞等待rcu_gp.futex变更
 			} else {
 				/* Temporarily unlock the registry lock. */
 				mutex_unlock(&rcu_registry_lock);

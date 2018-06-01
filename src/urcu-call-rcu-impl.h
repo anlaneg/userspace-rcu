@@ -57,13 +57,17 @@ struct call_rcu_data {
 	 * effectively empties the queue, and requires to touch the tail
 	 * anyway.
 	 */
-	struct cds_wfcq_tail cbs_tail;
-	struct cds_wfcq_head cbs_head;
+	//指向当前线程上rcu回调队列
+	struct cds_wfcq_tail cbs_tail;//尾
+	struct cds_wfcq_head cbs_head;//头
+
 	unsigned long flags;
-	int32_t futex;
+	int32_t futex;//阻塞变量，用于在cbs_head为空时在此变量上阻塞
+
 	//cbs_head队列长度
 	unsigned long qlen; /* maintained for debugging. */
-	pthread_t tid;
+	pthread_t tid;//线程id
+
 	int cpu_affinity;
 	unsigned long gp_count;
 	struct cds_list_head list;
@@ -88,7 +92,6 @@ struct call_rcu_completion_work {
 static CDS_LIST_HEAD(call_rcu_data_list);
 
 /* Link a thread using call_rcu() to its call_rcu thread. */
-
 static DEFINE_URCU_TLS(struct call_rcu_data *, thread_call_rcu_data);
 
 /*
@@ -271,7 +274,7 @@ static void call_rcu_wake_up(struct call_rcu_data *crdp)
 	cmm_smp_mb();
 	if (caa_unlikely(uatomic_read(&crdp->futex) == -1)) {
 		uatomic_set(&crdp->futex, 0);
-		//知会其它线程已有元素入队
+		//知会其它线程本线程已有元素入队
 		if (futex_async(&crdp->futex, FUTEX_WAKE, 1,
 				NULL, NULL, 0) < 0)
 			urcu_die(errno);
@@ -366,7 +369,7 @@ static void *call_rcu_thread(void *arg)
 			rcu_register_thread();
 		}
 
-		//阻塞交换crdp->cbs_head上的元素
+		//阻塞交换crdp->cbs_head上的元素到cbs_tmp_head
 		cds_wfcq_init(&cbs_tmp_head, &cbs_tmp_tail);
 		splice_ret = __cds_wfcq_splice_blocking(&cbs_tmp_head,
 			&cbs_tmp_tail, &crdp->cbs_head, &crdp->cbs_tail);
@@ -374,13 +377,13 @@ static void *call_rcu_thread(void *arg)
 		assert(splice_ret != CDS_WFCQ_RET_DEST_NON_EMPTY);
 
 		if (splice_ret != CDS_WFCQ_RET_SRC_EMPTY) {
-			//自crdp->cbs_head上交换到了多个元素，遍历这些元素，并调用对应的回调
+			//等待解锁可执行
 			synchronize_rcu();
 			cbcount = 0;
+			////自crdp->cbs_head上交换到了多个元素，遍历这些元素，并调用对应的回调
 			__cds_wfcq_for_each_blocking_safe(&cbs_tmp_head,
 					&cbs_tmp_tail, cbs, cbs_tmp_n) {
 				struct rcu_head *rhp;
-
 				rhp = caa_container_of(cbs,
 					struct rcu_head, next);
 				rhp->func(rhp);//调用注册的回调
@@ -428,7 +431,7 @@ static void *call_rcu_thread(void *arg)
  * structure, linking the structure in as specified.  Caller must hold
  * call_rcu_mutex.
  */
-//初始化crdpp，并创建线程运行call_rcu_thread
+//初始化crdpp，并创建线程运行call_rcu_thread（此线程负责调起回调）
 static void call_rcu_data_init(struct call_rcu_data **crdpp,
 			       unsigned long flags,
 			       int cpu_affinity)
@@ -444,11 +447,12 @@ static void call_rcu_data_init(struct call_rcu_data **crdpp,
 	crdp->qlen = 0;
 	crdp->futex = 0;
 	crdp->flags = flags;
-	cds_list_add(&crdp->list, &call_rcu_data_list);
+	cds_list_add(&crdp->list, &call_rcu_data_list);//将crdp添加到call_rcu_data_list中
 	crdp->cpu_affinity = cpu_affinity;
 	crdp->gp_count = 0;
 	cmm_smp_mb();  /* Structure initialized before pointer is planted. *///防下一行先执行
 	*crdpp = crdp;
+	//构造此crdp对应的线程
 	ret = pthread_create(&crdp->tid, NULL, call_rcu_thread, crdp);
 	if (ret)
 		urcu_die(ret);
@@ -570,13 +574,16 @@ int set_cpu_call_rcu_data(int cpu, struct call_rcu_data *crdp)
 
 struct call_rcu_data *get_default_call_rcu_data(void)
 {
+	//已创建，则直接返回
 	if (default_call_rcu_data != NULL)
 		return rcu_dereference(default_call_rcu_data);
 	call_rcu_lock(&call_rcu_mutex);
+	//加锁后再查一次
 	if (default_call_rcu_data != NULL) {
 		call_rcu_unlock(&call_rcu_mutex);
 		return default_call_rcu_data;
 	}
+	//创建default_call_rcu_data,指定cpu亲昵性为all，flags为0
 	call_rcu_data_init(&default_call_rcu_data, 0, -1);
 	call_rcu_unlock(&call_rcu_mutex);
 	return default_call_rcu_data;
@@ -598,6 +605,7 @@ struct call_rcu_data *get_call_rcu_data(void)
 	struct call_rcu_data *crd;
 
 	//如果有per线程的thread_call_rcu_data，则直接返回
+	//此变量在get_default_call_rcu_data()函数下设置
 	if (URCU_TLS(thread_call_rcu_data) != NULL)
 		return URCU_TLS(thread_call_rcu_data);
 
@@ -607,6 +615,7 @@ struct call_rcu_data *get_call_rcu_data(void)
 			return crd;
 	}
 
+	//创建rcu_data
 	return get_default_call_rcu_data();
 }
 
@@ -710,7 +719,8 @@ static void _call_rcu(struct rcu_head *head,
 	//将head加入到crdp队列中
 	cds_wfcq_enqueue(&crdp->cbs_head, &crdp->cbs_tail, &head->next);
 	uatomic_inc(&crdp->qlen);//增加队列长度
-	wake_call_rcu_thread(crdp);//知会其它线程自此队列上拿head并处理
+	//知会其它线程自此队列上拿head并处理
+	wake_call_rcu_thread(crdp);
 }
 
 /*
@@ -727,6 +737,7 @@ static void _call_rcu(struct rcu_head *head,
  *
  * call_rcu must be called by registered RCU read-side threads.
  */
+//注册rcu回调
 void call_rcu(struct rcu_head *head,
 	      void (*func)(struct rcu_head *head))
 {
@@ -736,7 +747,7 @@ void call_rcu(struct rcu_head *head,
 	//加读锁
 	_rcu_read_lock();
 	crdp = get_call_rcu_data();//取私有数据
-	_call_rcu(head, func, crdp);
+	_call_rcu(head, func, crdp);//将回调添加到线程自身的队列中
 	//解读锁
 	_rcu_read_unlock();
 }
