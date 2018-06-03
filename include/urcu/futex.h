@@ -33,6 +33,7 @@ extern "C" {
 #define FUTEX_WAIT		0
 #define FUTEX_WAKE		1
 
+//提供futex系统调用的兼容实现
 /*
  * sys_futex compatibility header.
  * Use *only* *either of* futex_noasync OR futex_async on a given address.

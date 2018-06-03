@@ -33,6 +33,9 @@
  */
 
 /* Mapping macros to allow multiple flavors in a single binary. */
+//如文件注释所言，采用映射宏的目的仅仅容许在单个二进制库中容许多个flavors,所在本
+//文件的主要目的不是为了多态性的重新定义函数，而仅仅是为了函数重命名，故此文件存在并不
+//影响代码逻辑
 
 #if !defined(RCU_MEMBARRIER) && !defined(RCU_SIGNAL) && !defined(RCU_MB)
 #define RCU_MEMBARRIER
@@ -60,11 +63,13 @@
 //rcu系统初始化
 #define rcu_init			rcu_init_memb
 #define rcu_exit			rcu_exit_memb
+
 //等待可执行
 #define synchronize_rcu			synchronize_rcu_memb
 #define rcu_reader			rcu_reader_memb
 #define rcu_gp				rcu_gp_memb
 
+//返回对应cpu的rcu_data
 #define get_cpu_call_rcu_data		get_cpu_call_rcu_data_memb
 #define get_call_rcu_thread		get_call_rcu_thread_memb
 #define create_call_rcu_data		create_call_rcu_data_memb
@@ -77,6 +82,7 @@
 #define set_thread_call_rcu_data	set_thread_call_rcu_data_memb
 #define create_all_cpu_call_rcu_data	create_all_cpu_call_rcu_data_memb
 #define free_all_cpu_call_rcu_data	free_all_cpu_call_rcu_data_memb
+
 //注册rcu变更回调（回调将在合适期间被调用）
 #define call_rcu			call_rcu_memb
 #define call_rcu_data_free		call_rcu_data_free_memb
@@ -85,12 +91,13 @@
 #define call_rcu_after_fork_child	call_rcu_after_fork_child_memb
 #define rcu_barrier			rcu_barrier_memb
 
-#define defer_rcu			defer_rcu_memb
-#define rcu_defer_register_thread	rcu_defer_register_thread_memb
-#define rcu_defer_unregister_thread	rcu_defer_unregister_thread_memb
-#define rcu_defer_barrier		rcu_defer_barrier_memb
-#define rcu_defer_barrier_thread	rcu_defer_barrier_thread_memb
-#define rcu_defer_exit			rcu_defer_exit_memb
+//这种采用defer线程处理（全局仅创建一个defer线程用于执行rcu回调）
+#define defer_rcu			defer_rcu_memb //实现回调注册
+#define rcu_defer_register_thread	rcu_defer_register_thread_memb //创建defer_queue,并创建一个defer线程
+#define rcu_defer_unregister_thread	rcu_defer_unregister_thread_memb //解注册
+#define rcu_defer_barrier		rcu_defer_barrier_memb //执行已注册的所有rcu回调
+#define rcu_defer_barrier_thread	rcu_defer_barrier_thread_memb //加锁执行rcu回调
+#define rcu_defer_exit			rcu_defer_exit_memb //解注册后退出
 
 #define rcu_flavor			rcu_flavor_memb
 

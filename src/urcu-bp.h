@@ -41,6 +41,7 @@
 extern "C" {
 #endif
 
+//实现函数映射
 #include <urcu/map/urcu-bp.h>
 
 /*
@@ -93,6 +94,7 @@ extern void rcu_read_unlock(void);
 extern int rcu_read_ongoing(void);
 
 extern void *rcu_dereference_sym_bp(void *p);
+//实现p指针的一份copy
 #define rcu_dereference_bp(p)						     \
 	__extension__							     \
 	({								     \
@@ -102,6 +104,7 @@ extern void *rcu_dereference_sym_bp(void *p);
 	})
 
 extern void *rcu_cmpxchg_pointer_sym_bp(void **p, void *old, void *_new);
+//实现 if *p == old then *p=new;
 #define rcu_cmpxchg_pointer_bp(p, old, _new)				     \
 	__extension__							     \
 	({								     \
@@ -114,6 +117,7 @@ extern void *rcu_cmpxchg_pointer_sym_bp(void **p, void *old, void *_new);
 		(_________p1);						     \
 	})
 
+//实现两个指定原子交换
 extern void *rcu_xchg_pointer_sym_bp(void **p, void *v);
 #define rcu_xchg_pointer_bp(p, v)					     \
 	__extension__							     \
@@ -125,6 +129,7 @@ extern void *rcu_xchg_pointer_sym_bp(void **p, void *v);
 		(_________p1);						     \
 	})
 
+//设置*p=v
 extern void *rcu_set_pointer_sym_bp(void **p, void *v);
 #define rcu_set_pointer_bp(p, v)					     \
 	__extension__							     \

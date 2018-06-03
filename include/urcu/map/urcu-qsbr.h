@@ -67,6 +67,7 @@
 #define call_rcu_after_fork_child	call_rcu_after_fork_child_qsbr
 #define rcu_barrier			rcu_barrier_qsbr
 
+//defer相关
 #define defer_rcu			defer_rcu_qsbr
 #define rcu_defer_register_thread	rcu_defer_register_thread_qsbr
 #define rcu_defer_unregister_thread	rcu_defer_unregister_thread_qsbr

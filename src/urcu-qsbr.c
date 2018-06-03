@@ -165,7 +165,7 @@ static void wait_for_readers(struct cds_list_head *input_readers,
 			 */
 			cmm_smp_wmb();
 			cds_list_for_each_entry(index, input_readers, node) {
-				_CMM_STORE_SHARED(index->waiting, 1);
+				_CMM_STORE_SHARED(index->waiting, 1);//将其置为1表示等待
 			}
 			/* Write futex before read reader_gp */
 			cmm_smp_mb();

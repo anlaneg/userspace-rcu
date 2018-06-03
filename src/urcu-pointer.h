@@ -65,15 +65,18 @@ extern "C" {
 #else /* !(defined(_LGPL_SOURCE) || defined(URCU_INLINE_SMALL_FUNCTIONS)) */
 
 extern void *rcu_dereference_sym(void *p);
+//获得p指针的一份copy
 #define rcu_dereference(p)						     \
 	__extension__							     \
 	({								     \
+		/*将p强转为void*然后调用rcu_dereference_sym并返回*/\
 		__typeof__(p) _________p1 =	URCU_FORCE_CAST(__typeof__(p), \
 			rcu_dereference_sym(URCU_FORCE_CAST(void *, p)));    \
 		(_________p1);						     \
 	})
 
 extern void *rcu_cmpxchg_pointer_sym(void **p, void *old, void *_new);
+//实现原子的比对并交换
 #define rcu_cmpxchg_pointer(p, old, _new)				     \
 	__extension__							     \
 	({								     \
@@ -87,6 +90,7 @@ extern void *rcu_cmpxchg_pointer_sym(void **p, void *old, void *_new);
 	})
 
 extern void *rcu_xchg_pointer_sym(void **p, void *v);
+//实现原子的p,v变量互换
 #define rcu_xchg_pointer(p, v)						     \
 	__extension__							     \
 	({								     \
@@ -104,6 +108,7 @@ extern void *rcu_xchg_pointer_sym(void **p, void *v);
  * error.
  */
 extern void *rcu_set_pointer_sym(void **p, void *v);
+//原子set
 #define rcu_set_pointer(p, v)						     \
 	do {								     \
 		__typeof__(*(p)) _________pv = (v);		             \

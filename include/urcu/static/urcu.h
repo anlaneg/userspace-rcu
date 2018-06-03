@@ -125,8 +125,8 @@ static inline void smp_mb_slave(void)
  */
 #define RCU_GP_COUNT		(1UL << 0)
 /* Use the amount of bits equal to half of the architecture long size */
-#define RCU_GP_CTR_PHASE	(1UL << (sizeof(unsigned long) << 2))　//在64位机器上，此值为1<<32
-#define RCU_GP_CTR_NEST_MASK	(RCU_GP_CTR_PHASE - 1)
+#define RCU_GP_CTR_PHASE	(1UL << (sizeof(unsigned long) << 2)) //在64位机器上，此值为1<<32
+#define RCU_GP_CTR_NEST_MASK (RCU_GP_CTR_PHASE - 1)
 
 struct rcu_gp {
 	/*
@@ -145,7 +145,7 @@ extern struct rcu_gp rcu_gp;
 
 struct rcu_reader {
 	/* Data used by both reader and synchronize_rcu() */
-	//这个变量的深层目的是？
+	//通过ctr可以获知各reader的加锁情况，进而知道rcu的grace period
 	unsigned long ctr;
 	char need_mb;
 	/* Data used for registry */
@@ -184,7 +184,7 @@ static inline enum rcu_state rcu_reader_state(unsigned long *ctr)
 	 * to insure consistency.
 	 */
 	v = CMM_LOAD_SHARED(*ctr);//取ctr的值
-	if (!(v & RCU_GP_CTR_NEST_MASK))
+	if (!(v	& RCU_GP_CTR_NEST_MASK))
 		//未被加锁
 		return RCU_READER_INACTIVE;
 	if (!((v ^ rcu_gp.ctr) & RCU_GP_CTR_PHASE))

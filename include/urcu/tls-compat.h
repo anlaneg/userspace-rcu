@@ -32,6 +32,7 @@
 extern "C" {
 #endif
 
+//提供线程变量兼容性实现
 #ifdef CONFIG_RCU_TLS	/* Based on ax_tls.m4 */
 
 /*

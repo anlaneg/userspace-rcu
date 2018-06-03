@@ -32,6 +32,7 @@
 
 extern void synchronize_rcu(void);
 
+//获得p指针的一份copy
 void *rcu_dereference_sym(void *p)
 {
 	return _rcu_dereference(p);
@@ -46,6 +47,7 @@ void *rcu_set_pointer_sym(void **p, void *v)
 	return v;
 }
 
+//实现p,v变量互换
 void *rcu_xchg_pointer_sym(void **p, void *v)
 {
 	cmm_wmb();

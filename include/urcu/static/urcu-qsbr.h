@@ -97,11 +97,12 @@ extern DECLARE_URCU_TLS(struct rcu_reader, rcu_reader);
 static inline void wake_up_gp(void)
 {
 	if (caa_unlikely(_CMM_LOAD_SHARED(URCU_TLS(rcu_reader).waiting))) {
+		//如果waiting为1，将其置为0
 		_CMM_STORE_SHARED(URCU_TLS(rcu_reader).waiting, 0);
 		cmm_smp_mb();
 		if (uatomic_read(&rcu_gp.futex) != -1)
-			return;
-		uatomic_set(&rcu_gp.futex, 0);
+			return;//如果未等待，则不通知
+		uatomic_set(&rcu_gp.futex, 0);//否则知会等待方
 		/*
 		 * Ignoring return value until we can make this function
 		 * return something (because urcu_die() is not publicly

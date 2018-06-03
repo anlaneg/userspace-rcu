@@ -46,6 +46,7 @@
 #include "urcu-die.h"
 
 /* Do not #define _LGPL_SOURCE to ensure we can emit the wrapper symbols */
+//urcu-bp.h在包含时不会传_LGPL_SOURCE
 #undef _LGPL_SOURCE
 #include "urcu-bp.h"
 #define _LGPL_SOURCE
@@ -59,6 +60,7 @@ static
 void *mremap_wrapper(void *old_address, size_t old_size,
 		size_t new_size, int flags)
 {
+	//remap旧的地址old_address
 	return mremap(old_address, old_size, new_size, flags);
 }
 #else
@@ -170,6 +172,7 @@ static struct registry_arena registry_arena = {
 /* Saved fork signal mask, protected by rcu_gp_lock */
 static sigset_t saved_fork_signal_mask;
 
+//实现pthread_mutex加锁
 static void mutex_lock(pthread_mutex_t *mutex)
 {
 	int ret;
@@ -179,6 +182,7 @@ static void mutex_lock(pthread_mutex_t *mutex)
 	if (ret)
 		urcu_die(ret);
 #else /* #ifndef DISTRUST_SIGNALS_EXTREME */
+	//调用trylock实现加锁尝试
 	while ((ret = pthread_mutex_trylock(mutex)) != 0) {
 		if (ret != EBUSY && ret != EINTR)
 			urcu_die(ret);
@@ -187,6 +191,7 @@ static void mutex_lock(pthread_mutex_t *mutex)
 #endif /* #else #ifndef DISTRUST_SIGNALS_EXTREME */
 }
 
+//实现mutex解锁
 static void mutex_unlock(pthread_mutex_t *mutex)
 {
 	int ret;
@@ -210,6 +215,7 @@ static void smp_mb_master(void)
  * Always called with rcu_registry lock held. Releases this lock between
  * iterations and grabs it again. Holds the lock when it returns.
  */
+//等待input_readers中的元素，使其可划分到cur_snap_readers,qsreaders队列中
 static void wait_for_readers(struct cds_list_head *input_readers,
 			struct cds_list_head *cur_snap_readers,
 			struct cds_list_head *qsreaders)
@@ -374,6 +380,7 @@ void rcu_read_unlock(void)
 	_rcu_read_unlock();
 }
 
+//返回此线程加锁情况
 int rcu_read_ongoing(void)
 {
 	return _rcu_read_ongoing();
@@ -395,9 +402,11 @@ void expand_arena(struct registry_arena *arena)
 
 	/* No chunk. */
 	if (cds_list_empty(&arena->chunk_list)) {
+		//chunk_list为空，需要申请并加入节点
 		assert(ARENA_INIT_ALLOC >=
 			sizeof(struct registry_chunk)
 			+ sizeof(struct rcu_reader));
+		//申请空间
 		new_chunk_len = ARENA_INIT_ALLOC;
 		new_chunk = (struct registry_chunk *) mmap(NULL,
 			new_chunk_len,
@@ -405,7 +414,8 @@ void expand_arena(struct registry_arena *arena)
 			MAP_ANONYMOUS | MAP_PRIVATE,
 			-1, 0);
 		if (new_chunk == MAP_FAILED)
-			abort();
+			abort();//申请失败
+		//初始化后加入到arena->chunk_list中
 		memset(new_chunk, 0, new_chunk_len);
 		new_chunk->data_len =
 			new_chunk_len - sizeof(struct registry_chunk);
@@ -421,9 +431,11 @@ void expand_arena(struct registry_arena *arena)
 	new_chunk_len = old_chunk_len << 1;
 
 	/* Don't allow memory mapping to move, just expand. */
+	//采用remap扩大原来申请的空间
 	new_chunk = mremap_wrapper(last_chunk, old_chunk_len,
 		new_chunk_len, 0);
 	if (new_chunk != MAP_FAILED) {
+		//申请成功，初始化多余部分
 		/* Should not have moved. */
 		assert(new_chunk == last_chunk);
 		memset((char *) last_chunk + old_chunk_len, 0,
@@ -434,12 +446,14 @@ void expand_arena(struct registry_arena *arena)
 	}
 
 	/* Remap did not succeed, we need to add a new chunk. */
+	//remap不成功，采用mmap申请一会新空间，并进行挂接
 	new_chunk = (struct registry_chunk *) mmap(NULL,
 		new_chunk_len,
 		PROT_READ | PROT_WRITE,
 		MAP_ANONYMOUS | MAP_PRIVATE,
 		-1, 0);
 	if (new_chunk == MAP_FAILED)
+		//申请失败，报错
 		abort();
 	memset(new_chunk, 0, new_chunk_len);
 	new_chunk->data_len =
@@ -447,6 +461,7 @@ void expand_arena(struct registry_arena *arena)
 	cds_list_add_tail(&new_chunk->node, &arena->chunk_list);
 }
 
+//管理内存申请
 static
 struct rcu_reader *arena_alloc(struct registry_arena *arena)
 {
@@ -460,6 +475,7 @@ retry:
 		if (chunk->data_len - chunk->used < len)
 			continue;
 		/* Find spot */
+		//找一个空闲的点
 		for (rcu_reader_reg = (struct rcu_reader *) &chunk->data[0];
 				rcu_reader_reg < (struct rcu_reader *) &chunk->data[chunk->data_len];
 				rcu_reader_reg++) {
@@ -471,6 +487,7 @@ retry:
 		}
 	}
 
+	//没有查找，且需要扩展，则进行扩展
 	if (!expand_done) {
 		expand_arena(arena);
 		expand_done = 1;
@@ -487,14 +504,17 @@ void add_thread(void)
 	struct rcu_reader *rcu_reader_reg;
 	int ret;
 
+	//申请一个rcu_reader_reg空间
 	rcu_reader_reg = arena_alloc(&registry_arena);
 	if (!rcu_reader_reg)
 		abort();
+	//指定为私有数据
 	ret = pthread_setspecific(urcu_bp_key, rcu_reader_reg);
 	if (ret)
 		abort();
 
 	/* Add to registry */
+	//完成线程注册
 	rcu_reader_reg->tid = pthread_self();
 	assert(rcu_reader_reg->ctr == 0);
 	cds_list_add(&rcu_reader_reg->node, &registry);
@@ -502,6 +522,7 @@ void add_thread(void)
 	 * Reader threads are pointing to the reader registry. This is
 	 * why its memory should never be relocated.
 	 */
+	//将私有变量存入tls中，以消除函数访问问题
 	URCU_TLS(rcu_reader) = rcu_reader_reg;
 }
 
@@ -541,11 +562,13 @@ void remove_thread(struct rcu_reader *rcu_reader_reg)
 }
 
 /* Disable signals, take mutex, add to registry */
+//实现rcu线程注册
 void rcu_bp_register(void)
 {
 	sigset_t newmask, oldmask;
 	int ret;
 
+	//阻塞所有信号
 	ret = sigfillset(&newmask);
 	if (ret)
 		abort();
@@ -565,9 +588,11 @@ void rcu_bp_register(void)
 	 */
 	rcu_bp_init();
 
+	//添加进线程
 	mutex_lock(&rcu_registry_lock);
 	add_thread();
 	mutex_unlock(&rcu_registry_lock);
+	//恢复信号
 end:
 	ret = pthread_sigmask(SIG_SETMASK, &oldmask, NULL);
 	if (ret)
@@ -575,6 +600,7 @@ end:
 }
 
 /* Disable signals, take mutex, remove from registry */
+//解除线程注册
 static
 void rcu_bp_unregister(struct rcu_reader *rcu_reader_reg)
 {
@@ -604,6 +630,7 @@ void rcu_bp_unregister(struct rcu_reader *rcu_reader_reg)
 static
 void urcu_bp_thread_exit_notifier(void *rcu_key)
 {
+	//保证线程退出时解注册
 	rcu_bp_unregister(rcu_key);
 }
 
@@ -641,6 +668,7 @@ void rcu_sys_membarrier_init(void)
 	rcu_sys_membarrier_status(available);
 }
 
+//bp方式初始化，创建私有key
 static
 void rcu_bp_init(void)
 {
@@ -648,6 +676,7 @@ void rcu_bp_init(void)
 	if (!rcu_bp_refcount++) {
 		int ret;
 
+		//注册线程退出时处理
 		ret = pthread_key_create(&urcu_bp_key,
 				urcu_bp_thread_exit_notifier);
 		if (ret)
@@ -658,6 +687,7 @@ void rcu_bp_init(void)
 	mutex_unlock(&init_lock);
 }
 
+//bp方式退出
 static
 void rcu_bp_exit(void)
 {
@@ -690,13 +720,14 @@ void rcu_bp_before_fork(void)
 	sigset_t newmask, oldmask;
 	int ret;
 
+	//阻塞所有信号
 	ret = sigfillset(&newmask);
 	assert(!ret);
 	ret = pthread_sigmask(SIG_BLOCK, &newmask, &oldmask);
 	assert(!ret);
-	mutex_lock(&rcu_gp_lock);
-	mutex_lock(&rcu_registry_lock);
-	saved_fork_signal_mask = oldmask;
+	mutex_lock(&rcu_gp_lock);//禁止调用rcu同步函数
+	mutex_lock(&rcu_registry_lock);//禁止注册线程
+	saved_fork_signal_mask = oldmask;//记录旧的信号mask
 }
 
 void rcu_bp_after_fork_parent(void)
@@ -705,8 +736,9 @@ void rcu_bp_after_fork_parent(void)
 	int ret;
 
 	oldmask = saved_fork_signal_mask;
-	mutex_unlock(&rcu_registry_lock);
-	mutex_unlock(&rcu_gp_lock);
+	mutex_unlock(&rcu_registry_lock);//容许线程注册
+	mutex_unlock(&rcu_gp_lock);//容许rcu调用
+	//还原信号
 	ret = pthread_sigmask(SIG_SETMASK, &oldmask, NULL);
 	assert(!ret);
 }
@@ -734,6 +766,7 @@ void urcu_bp_prune_registry(void)
 	}
 }
 
+//fork后子进程调用
 void rcu_bp_after_fork_child(void)
 {
 	sigset_t oldmask;
@@ -741,17 +774,20 @@ void rcu_bp_after_fork_child(void)
 
 	urcu_bp_prune_registry();
 	oldmask = saved_fork_signal_mask;
-	mutex_unlock(&rcu_registry_lock);
-	mutex_unlock(&rcu_gp_lock);
+	mutex_unlock(&rcu_registry_lock);//容许新线程注册
+	mutex_unlock(&rcu_gp_lock);//容许rcu同步
+	//还原信号注册
 	ret = pthread_sigmask(SIG_SETMASK, &oldmask, NULL);
 	assert(!ret);
 }
 
+//实现p指针的一份copy
 void *rcu_dereference_sym_bp(void *p)
 {
 	return _rcu_dereference(p);
 }
 
+//实现原子set
 void *rcu_set_pointer_sym_bp(void **p, void *v)
 {
 	cmm_wmb();
@@ -759,18 +795,21 @@ void *rcu_set_pointer_sym_bp(void **p, void *v)
 	return v;
 }
 
+//实现原子交换
 void *rcu_xchg_pointer_sym_bp(void **p, void *v)
 {
 	cmm_wmb();
 	return uatomic_xchg(p, v);
 }
 
+//实现原子的比对并赋值
 void *rcu_cmpxchg_pointer_sym_bp(void **p, void *old, void *_new)
 {
 	cmm_wmb();
 	return uatomic_cmpxchg(p, old, _new);
 }
 
+//申明rcu flavor
 DEFINE_RCU_FLAVOR(rcu_flavor);
 
 #include "urcu-call-rcu-impl.h"

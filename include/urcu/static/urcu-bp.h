@@ -163,6 +163,7 @@ static inline void _rcu_read_lock_update(unsigned long tmp)
  * intent is that this function meets the 10-line criterion in LGPL,
  * allowing this function to be invoked directly from non-LGPL code.
  */
+//在加锁时，检查如果线程没有register，则注册它
 static inline void _rcu_read_lock(void)
 {
 	unsigned long tmp;
@@ -201,6 +202,7 @@ static inline void _rcu_read_unlock(void)
  * function meets the 10-line criterion for LGPL, allowing this function
  * to be invoked directly from non-LGPL code.
  */
+//如果线程未注册，则注册线程；如果线程注册，则返回当前线程的ctr的加锁情况
 static inline int _rcu_read_ongoing(void)
 {
 	if (caa_unlikely(!URCU_TLS(rcu_reader)))

@@ -58,6 +58,7 @@ struct rcu_flavor_struct {
 	void (*unregister_rculfhash_atfork)(struct urcu_atfork *atfork);
 };
 
+//初始化flavor结构体
 #define DEFINE_RCU_FLAVOR(x)				\
 const struct rcu_flavor_struct x = {			\
 	.read_lock		= rcu_read_lock,	\

@@ -39,6 +39,7 @@ struct __uatomic_dummy {
 };
 #define __hp(x)	((struct __uatomic_dummy *)(x))
 
+//实现原子设置
 #define _uatomic_set(addr, v)	((void) CMM_STORE_SHARED(*(addr), (v)))
 
 /* cmpxchg */
@@ -589,12 +590,14 @@ extern unsigned long _compat_uatomic_add_return(void *addr,
 #endif
 
 /* Read is atomic even in compat mode */
-//注展开的一种可能为_uatomic_set(addr,v)，set只是参数
+//注展开的一种可能为_uatomic_set(addr,v)，set只是参数，实现原子的赋值
 #define uatomic_set(addr, v)			\
 		UATOMIC_COMPAT(set(addr, v))
 
+//实现原子的比对并赋值
 #define uatomic_cmpxchg(addr, old, _new)	\
 		UATOMIC_COMPAT(cmpxchg(addr, old, _new))
+//实现两个指针交换
 #define uatomic_xchg(addr, v)			\
 		UATOMIC_COMPAT(xchg(addr, v))
 

@@ -587,6 +587,7 @@ unsigned long _uatomic_exchange(void *addr, unsigned long val, int len)
 #define cmm_smp_mb__after_uatomic_add()		cmm_barrier()
 #endif
 
+//实现原子减
 #define uatomic_sub_return(addr, v)	\
 	uatomic_add_return((addr), -(caa_cast_long_keep_sign(v)))
 #define uatomic_sub(addr, v)		\

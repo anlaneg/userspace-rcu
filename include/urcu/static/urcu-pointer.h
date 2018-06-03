@@ -67,7 +67,9 @@ extern "C" {
 #define _rcu_dereference(p)						\
 				__extension__				\
 				({					\
+				/*拷贝p指针数值到_________p1,得到元素的一份副本，防止在后面的运算中p数值变更*/\
 				__typeof__(p) _________p1 = CMM_LOAD_SHARED(p); \
+				/*x86平台以下宏定义为空*/\
 				cmm_smp_read_barrier_depends();		\
 				(_________p1);				\
 				})
@@ -85,6 +87,7 @@ extern "C" {
  * meets the 10-line criterion in LGPL, allowing this function to be
  * expanded directly in non-LGPL code.
  */
+//实现原子的比对并赋值操作
 #define _rcu_cmpxchg_pointer(p, old, _new)				\
 	__extension__							\
 	({								\

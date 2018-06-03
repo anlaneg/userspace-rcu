@@ -68,7 +68,7 @@ struct call_rcu_data {
 	unsigned long qlen; /* maintained for debugging. */
 	pthread_t tid;//线程id
 
-	int cpu_affinity;
+	int cpu_affinity;//cpu的亲呢性
 	unsigned long gp_count;
 	struct cds_list_head list;
 } __attribute__((aligned(CAA_CACHE_LINE_SIZE)));
@@ -214,7 +214,7 @@ int set_thread_cpu_affinity(struct call_rcu_data *crdp)
 	int ret;
 
 	if (crdp->cpu_affinity < 0)
-		return 0;//未配置
+		return 0;//如果cpu亲昵配置为负数，则不生效
 	if (++crdp->gp_count & SET_AFFINITY_CHECK_PERIOD_MASK)
 		return 0;
 	if (urcu_sched_getcpu() == crdp->cpu_affinity)
@@ -246,12 +246,14 @@ int set_thread_cpu_affinity(struct call_rcu_data *crdp)
 }
 #endif
 
+//等待crdp->futex更改为非-1
 static void call_rcu_wait(struct call_rcu_data *crdp)
 {
 	/* Read call_rcu list before read futex */
 	cmm_smp_mb();
 	if (uatomic_read(&crdp->futex) != -1)
-		return;
+		return;//变量不为-1,直接返回
+	//等待变量变为非-1
 	while (futex_async(&crdp->futex, FUTEX_WAIT, -1,
 			NULL, NULL, 0)) {
 		switch (errno) {
@@ -268,25 +270,27 @@ static void call_rcu_wait(struct call_rcu_data *crdp)
 	}
 }
 
+//知会阻塞在crdp->futex的线程使其不再阻塞
 static void call_rcu_wake_up(struct call_rcu_data *crdp)
 {
 	/* Write to call_rcu list before reading/writing futex */
 	cmm_smp_mb();
 	if (caa_unlikely(uatomic_read(&crdp->futex) == -1)) {
 		uatomic_set(&crdp->futex, 0);
-		//知会其它线程本线程已有元素入队
+		//知会其它线程本线程已有元素入队,使call_rcu_wait线程返回
 		if (futex_async(&crdp->futex, FUTEX_WAKE, 1,
 				NULL, NULL, 0) < 0)
 			urcu_die(errno);
 	}
 }
 
+//等待completion->futex更改为非-1
 static void call_rcu_completion_wait(struct call_rcu_completion *completion)
 {
 	/* Read completion barrier count before read futex */
 	cmm_smp_mb();
 	if (uatomic_read(&completion->futex) != -1)
-		return;
+		return;//如果completion->futex为非-1,则不阻塞，否则阻塞
 	while (futex_async(&completion->futex, FUTEX_WAIT, -1,
 			NULL, NULL, 0)) {
 		switch (errno) {
@@ -303,6 +307,7 @@ static void call_rcu_completion_wait(struct call_rcu_completion *completion)
 	}
 }
 
+//知会阻塞在completion->futex的线程使其不再阻塞
 static void call_rcu_completion_wake_up(struct call_rcu_completion *completion)
 {
 	/* Write to completion barrier count before reading/writing futex */
@@ -317,10 +322,12 @@ static void call_rcu_completion_wake_up(struct call_rcu_completion *completion)
 
 /* This is the code run by each call_rcu thread. */
 
+//10ms一个批次，执行rcu回调
 static void *call_rcu_thread(void *arg)
 {
 	unsigned long cbcount;
 	struct call_rcu_data *crdp = (struct call_rcu_data *) arg;
+	//是否工作线程可real-time此本线程收到响应
 	int rt = !!(uatomic_read(&crdp->flags) & URCU_CALL_RCU_RT);
 
 	//设置cpu亲昵
@@ -335,6 +342,7 @@ static void *call_rcu_thread(void *arg)
 
 	URCU_TLS(thread_call_rcu_data) = crdp;//为当前线程设置crdp
 	if (!rt) {
+		//减少futex，如果在我们重新执行前futex未变化，则我们可以阻塞等待
 		uatomic_dec(&crdp->futex);
 		/* Decrement futex before reading call_rcu list */
 		cmm_smp_mb();
@@ -377,10 +385,10 @@ static void *call_rcu_thread(void *arg)
 		assert(splice_ret != CDS_WFCQ_RET_DEST_NON_EMPTY);
 
 		if (splice_ret != CDS_WFCQ_RET_SRC_EMPTY) {
-			//等待解锁可执行
+			//等待rcu可执行
 			synchronize_rcu();
 			cbcount = 0;
-			////自crdp->cbs_head上交换到了多个元素，遍历这些元素，并调用对应的回调
+			//自crdp->cbs_head上交换到了多个元素，遍历这些元素，并调用对应的回调
 			__cds_wfcq_for_each_blocking_safe(&cbs_tmp_head,
 					&cbs_tmp_tail, cbs, cbs_tmp_n) {
 				struct rcu_head *rhp;
@@ -389,27 +397,29 @@ static void *call_rcu_thread(void *arg)
 				rhp->func(rhp);//调用注册的回调
 				cbcount++;
 			}
-			uatomic_sub(&crdp->qlen, cbcount);//长度清0
+			uatomic_sub(&crdp->qlen, cbcount);//已注册的rcu回调长度清0
 		}
 		if (uatomic_read(&crdp->flags) & URCU_CALL_RCU_STOP)
-			break;
+			break;//收到线程停止标记，则直接跳出for并退出
 		rcu_thread_offline();
 		if (!rt) {
 			//队列为空，等待唤醒
 			if (cds_wfcq_empty(&crdp->cbs_head,
 					&crdp->cbs_tail)) {
-				call_rcu_wait(crdp);
-				(void) poll(NULL, 0, 10);
-				uatomic_dec(&crdp->futex);
+				call_rcu_wait(crdp);//阻塞等待
+				(void) poll(NULL, 0, 10);//延迟10ms
+				uatomic_dec(&crdp->futex);//减少futex
 				/*
 				 * Decrement futex before reading
 				 * call_rcu list.
 				 */
 				cmm_smp_mb();
 			} else {
+				//刚才队列已处理，但现在已有了，延迟10ms
 				(void) poll(NULL, 0, 10);
 			}
 		} else {
+			//总是延迟10ms
 			(void) poll(NULL, 0, 10);
 		}
 		rcu_thread_online();
@@ -421,8 +431,8 @@ static void *call_rcu_thread(void *arg)
 		cmm_smp_mb();
 		uatomic_set(&crdp->futex, 0);
 	}
-	uatomic_or(&crdp->flags, URCU_CALL_RCU_STOPPED);
-	rcu_unregister_thread();
+	uatomic_or(&crdp->flags, URCU_CALL_RCU_STOPPED);//指明线程已停止
+	rcu_unregister_thread();//解注册此线程
 	return NULL;
 }
 
@@ -452,7 +462,7 @@ static void call_rcu_data_init(struct call_rcu_data **crdpp,
 	crdp->gp_count = 0;
 	cmm_smp_mb();  /* Structure initialized before pointer is planted. *///防下一行先执行
 	*crdpp = crdp;
-	//构造此crdp对应的线程
+	//构造此crdp对应的线程，实现rcu写回调执行
 	ret = pthread_create(&crdp->tid, NULL, call_rcu_thread, crdp);
 	if (ret)
 		urcu_die(ret);
@@ -468,7 +478,7 @@ static void call_rcu_data_init(struct call_rcu_data **crdpp,
  * should be protected by RCU read-side lock.
  */
 
-//返回对应cpu的call_rcu_data
+//返回并创建当前cpu的call_rcu_data，如果不存在，则返回NULL
 struct call_rcu_data *get_cpu_call_rcu_data(int cpu)
 {
 	static int warned = 0;
@@ -509,6 +519,7 @@ static struct call_rcu_data *__create_call_rcu_data(unsigned long flags,
 	return crdp;
 }
 
+//创建call_rcu_data,并创建线程处理rcu写回调
 struct call_rcu_data *create_call_rcu_data(unsigned long flags,
 					   int cpu_affinity)
 {
@@ -532,7 +543,7 @@ struct call_rcu_data *create_call_rcu_data(unsigned long flags,
  * set_cpu_call_rcu_data() and call to call_rcu_data_free() passing the
  * previous call rcu data as argument.
  */
-
+//指定某一cpu使用crdp
 int set_cpu_call_rcu_data(int cpu, struct call_rcu_data *crdp)
 {
 	static int warned = 0;
@@ -571,7 +582,7 @@ int set_cpu_call_rcu_data(int cpu, struct call_rcu_data *crdp)
  * one if need be.  Because we never free call_rcu_data structures,
  * we don't need to be in an RCU read-side critical section.
  */
-
+//获取default_call_rcu_data,如果其对应的线程还没有创建，则创建（不支持cpu亲昵性）
 struct call_rcu_data *get_default_call_rcu_data(void)
 {
 	//已创建，则直接返回
@@ -651,7 +662,7 @@ void set_thread_call_rcu_data(struct call_rcu_data *crdp)
  * free_all_cpu_call_rcu_data() to teardown these call_rcu worker
  * threads.
  */
-
+//采用flags创建所有cpu的rcu_data
 int create_all_cpu_call_rcu_data(unsigned long flags)
 {
 	int i;
@@ -678,7 +689,7 @@ int create_all_cpu_call_rcu_data(unsigned long flags)
 			call_rcu_unlock(&call_rcu_mutex);
 			continue;
 		}
-		//针对cpu$i创建rcu_data
+		//针对cpu$i创建rcu_data,及执行rcu回调的
 		crdp = __create_call_rcu_data(flags, i);
 		if (crdp == NULL) {
 			call_rcu_unlock(&call_rcu_mutex);
@@ -686,6 +697,7 @@ int create_all_cpu_call_rcu_data(unsigned long flags)
 			return -ENOMEM;
 		}
 		call_rcu_unlock(&call_rcu_mutex);
+		//设置crdp为cpu$i的rcu_data
 		if ((ret = set_cpu_call_rcu_data(i, crdp)) != 0) {
 			call_rcu_data_free(crdp);
 
@@ -781,14 +793,19 @@ void call_rcu(struct rcu_head *head,
 void call_rcu_data_free(struct call_rcu_data *crdp)
 {
 	if (crdp == NULL || crdp == default_call_rcu_data) {
+		//default_call_rcu_data不能被free
 		return;
 	}
 	if ((uatomic_read(&crdp->flags) & URCU_CALL_RCU_STOPPED) == 0) {
+		//如果无stoped标记，则打上stop
 		uatomic_or(&crdp->flags, URCU_CALL_RCU_STOP);
+		//通知线程干活，使线程退出
 		wake_call_rcu_thread(crdp);
+		//等待线程退出
 		while ((uatomic_read(&crdp->flags) & URCU_CALL_RCU_STOPPED) == 0)
 			(void) poll(NULL, 0, 1);
 	}
+	//退出时可能有一些回调还没有做，将其放在default_call_rcu_data对应的线程上去做
 	if (!cds_wfcq_empty(&crdp->cbs_head, &crdp->cbs_tail)) {
 		/* Create default call rcu data if need be */
 		(void) get_default_call_rcu_data();
@@ -800,6 +817,7 @@ void call_rcu_data_free(struct call_rcu_data *crdp)
 		wake_call_rcu_thread(default_call_rcu_data);
 	}
 
+	//移除线程对应的crdp,并释放
 	call_rcu_lock(&call_rcu_mutex);
 	cds_list_del(&crdp->list);
 	call_rcu_unlock(&call_rcu_mutex);
@@ -865,14 +883,16 @@ void _rcu_barrier_complete(struct rcu_head *head)
 	work = caa_container_of(head, struct call_rcu_completion_work, head);
 	completion = work->completion;
 	if (!uatomic_sub_return(&completion->barrier_count, 1))
+		//引用减为0时，知会rcu_barrier已完成，通知completion的关注者
 		call_rcu_completion_wake_up(completion);
-	urcu_ref_put(&completion->ref, free_completion);
+	urcu_ref_put(&completion->ref, free_completion);//减少引用计数
 	free(work);
 }
 
 /*
  * Wait for all in-flight call_rcu callbacks to complete execution.
  */
+//此函数不容许在read-side thread调用,其用于确保所有rcu的callback均已完成执行
 void rcu_barrier(void)
 {
 	struct call_rcu_data *crdp;
@@ -889,6 +909,7 @@ void rcu_barrier(void)
 	 * section is an error.
 	 */
 	if (_rcu_read_ongoing()) {
+		//不容许rcu_barrier在read-side中调用(不保证100%检查出来）
 		static int warned = 0;
 
 		if (!warned) {
@@ -903,13 +924,15 @@ void rcu_barrier(void)
 		urcu_die(errno);
 
 	call_rcu_lock(&call_rcu_mutex);
+	//取call_rcu_data_list的长度
 	cds_list_for_each_entry(crdp, &call_rcu_data_list, list)
 		count++;
 
 	/* Referenced by rcu_barrier() and each call_rcu thread. */
-	urcu_ref_set(&completion->ref, count + 1);
-	completion->barrier_count = count;
+	urcu_ref_set(&completion->ref, count + 1);//增加引用计数
+	completion->barrier_count = count;//有多少队列就有多少个count
 
+	//为每个list中插入一个work
 	cds_list_for_each_entry(crdp, &call_rcu_data_list, list) {
 		struct call_rcu_completion_work *work;
 
@@ -917,17 +940,20 @@ void rcu_barrier(void)
 		if (!work)
 			urcu_die(errno);
 		work->completion = completion;
+		//将此work存入到crdp中，与rcu一起执行，等其执行完成work的阻塞者会收到通知
 		_call_rcu(&work->head, _rcu_barrier_complete, crdp);
 	}
 	call_rcu_unlock(&call_rcu_mutex);
 
 	/* Wait for them */
+	//等待completion对应的work被执行
 	for (;;) {
 		uatomic_dec(&completion->futex);
 		/* Decrement futex before reading barrier_count */
 		cmm_smp_mb();
 		if (!uatomic_read(&completion->barrier_count))
-			break;
+			break;//如果所有crdp均已完成complete的执行，则退出
+		//不是所有crdp均已完成，阻塞等待
 		call_rcu_completion_wait(completion);
 	}
 

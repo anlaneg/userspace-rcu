@@ -121,6 +121,7 @@ static pthread_mutex_t rcu_gp_lock = PTHREAD_MUTEX_INITIALIZER;
  */
 //用于保护rcu线程的注册过程
 static pthread_mutex_t rcu_registry_lock = PTHREAD_MUTEX_INITIALIZER;
+//全局变量对外提供ctr
 struct rcu_gp rcu_gp = { .ctr = RCU_GP_COUNT };
 
 /*

@@ -65,12 +65,14 @@
  * @type: type of the object.
  * @member: name of the field within the object.
  */
+//container_of宏使用
 #define caa_container_of(ptr, type, member)				\
 	__extension__							\
 	({								\
 		const __typeof__(((type *) NULL)->member) * __ptr = (ptr); \
 		(type *)((char *)__ptr - offsetof(type, member));	\
 	})
+
 
 #define CAA_BUILD_BUG_ON_ZERO(cond) (sizeof(struct { int:-!!(cond); }))
 #define CAA_BUILD_BUG_ON(cond) ((void)CAA_BUILD_BUG_ON_ZERO(cond))
@@ -83,12 +85,14 @@
  */
 #define __rcu
 
+//类型强转
 #ifdef __cplusplus
 #define URCU_FORCE_CAST(type, arg)	(reinterpret_cast<type>(arg))
 #else
 #define URCU_FORCE_CAST(type, arg)	((type) (arg))
 #endif
 
+//检查类型type是否为有符号类型
 #define caa_is_signed_type(type)	((type) -1 < (type) 0)
 
 /*
@@ -108,6 +112,7 @@
 	__attribute__((deprecated))
 #endif
 
+//数组长度
 #define CAA_ARRAY_SIZE(x)	(sizeof(x) / sizeof((x)[0]))
 
 /*
@@ -115,6 +120,7 @@
  */
 
 #ifdef __GNUC__
+//定义gcc版本号
 # define URCU_GCC_VERSION	(__GNUC__ * 10000 \
 				+ __GNUC_MINOR__ * 100 \
 				+ __GNUC_PATCHLEVEL__)

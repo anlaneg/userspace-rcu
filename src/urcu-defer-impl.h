@@ -54,7 +54,9 @@
 /*
  * Number of entries in the per-thread defer queue. Must be power of 2.
  */
+//queue长度
 #define DEFER_QUEUE_SIZE	(1 << 12)
+//queue长度对应的掩码
 #define DEFER_QUEUE_MASK	(DEFER_QUEUE_SIZE - 1)
 
 /*
@@ -74,6 +76,7 @@
 	(x = (void *)((unsigned long)(x) | DQ_FCT_BIT))
 #define DQ_CLEAR_FCT_BIT(x)	\
 	(x = (void *)((unsigned long)(x) & ~DQ_FCT_BIT))
+//不含DQ_FCT_BIT标记，用于测试
 #define DQ_FCT_MARK		((void *)(~DQ_FCT_BIT))
 
 /*
@@ -96,11 +99,11 @@
  * - else current element contains data
  */
 struct defer_queue {
-	unsigned long head;	/* add element at head */
+	unsigned long head;	/* add element at head */ //生产索引
 	void *last_fct_in;	/* last fct pointer encoded */
-	unsigned long tail;	/* next element to remove at tail */
+	unsigned long tail;	/* next element to remove at tail */ //消费索引
 	void *last_fct_out;	/* last fct pointer encoded */
-	void **q;
+	void **q;//环形队列
 	/* registry information */
 	unsigned long last_head;
 	struct cds_list_head list;	/* list of thread queues */
@@ -130,6 +133,7 @@ static DEFINE_URCU_TLS(struct defer_queue, defer_queue);
 static CDS_LIST_HEAD(registry_defer);
 static pthread_t tid_defer;
 
+//mutex加锁
 static void mutex_lock_defer(pthread_mutex_t *mutex)
 {
 	int ret;
@@ -152,6 +156,7 @@ static void mutex_lock_defer(pthread_mutex_t *mutex)
  */
 static void wake_up_defer(void)
 {
+	//如果defer_thread_futex为－1，则将其置为0，并wake其它线程
 	if (caa_unlikely(uatomic_read(&defer_thread_futex) == -1)) {
 		uatomic_set(&defer_thread_futex, 0);
 		if (futex_noasync(&defer_thread_futex, FUTEX_WAKE, 1,
@@ -160,6 +165,7 @@ static void wake_up_defer(void)
 	}
 }
 
+//遍历registery_defer链，返回合并后的number
 static unsigned long rcu_defer_num_callbacks(void)
 {
 	unsigned long num_items = 0, head;
@@ -177,6 +183,7 @@ static unsigned long rcu_defer_num_callbacks(void)
 /*
  * Defer thread waiting. Single thread.
  */
+//等待defer_thread_futex为非－1
 static void wait_defer(void)
 {
 	uatomic_dec(&defer_thread_futex);
@@ -184,17 +191,21 @@ static void wait_defer(void)
 	/* Write futex before read defer_thread_stop */
 	cmm_smp_mb();
 	if (_CMM_LOAD_SHARED(defer_thread_stop)) {
+		//如果需要stop,则将变量置为0，并退出线程
 		uatomic_set(&defer_thread_futex, 0);
 		pthread_exit(0);
 	}
+	//检查callback数量是否非0，如是，则将defer_thread_futex置为0，不需要等待
 	if (rcu_defer_num_callbacks()) {
 		cmm_smp_mb();	/* Read queue before write futex */
 		/* Callbacks are queued, don't wait. */
 		uatomic_set(&defer_thread_futex, 0);
 	} else {
+		//当前callback数量为0，需要等待
 		cmm_smp_rmb();	/* Read queue before read futex */
 		if (uatomic_read(&defer_thread_futex) != -1)
-			return;
+			return;//队列已有元素
+		//等待defer_thread_futex非－1
 		while (futex_noasync(&defer_thread_futex, FUTEX_WAIT, -1,
 				NULL, NULL, 0)) {
 			switch (errno) {
@@ -227,18 +238,24 @@ static void rcu_defer_barrier_queue(struct defer_queue *queue,
 	 * Head is only modified by owner thread.
 	 */
 
+	//遍历queue并执行对应的回调（注：一次出两个元素，1个是回调函数，1个是函数的参数）
 	for (i = queue->tail; i != head;) {
 		cmm_smp_rmb();       /* read head before q[]. */
 		p = CMM_LOAD_SHARED(queue->q[i++ & DEFER_QUEUE_MASK]);
 		if (caa_unlikely(DQ_IS_FCT_BIT(p))) {
-			DQ_CLEAR_FCT_BIT(p);
+			//p中包含有FCT标记
+			DQ_CLEAR_FCT_BIT(p);//清掉FCT标记
 			queue->last_fct_out = p;
+			//切换到下一个元素（做为参数）
 			p = CMM_LOAD_SHARED(queue->q[i++ & DEFER_QUEUE_MASK]);
 		} else if (caa_unlikely(p == DQ_FCT_MARK)) {
+			//如果p为DQ_FCT_MARK,则指定下一个元素为last_fct_out
 			p = CMM_LOAD_SHARED(queue->q[i++ & DEFER_QUEUE_MASK]);
 			queue->last_fct_out = p;
+			//切换到下一个元素（做为参数）
 			p = CMM_LOAD_SHARED(queue->q[i++ & DEFER_QUEUE_MASK]);
 		}
+		//取出last_fct_out,执行回调，并传入参数
 		fct = queue->last_fct_out;
 		fct(p);
 	}
@@ -253,11 +270,13 @@ static void _rcu_defer_barrier_thread(void)
 	head = URCU_TLS(defer_queue).head;
 	num_items = head - URCU_TLS(defer_queue).tail;
 	if (caa_unlikely(!num_items))
-		return;
-	synchronize_rcu();
+		return;//defer_queue为空，退出
+	synchronize_rcu();//等待rcu写回调可执行
+	//执行defer_queue中存放的回调
 	rcu_defer_barrier_queue(&URCU_TLS(defer_queue), head);
 }
 
+//加锁执行defer_queue中存放的回调
 void rcu_defer_barrier_thread(void)
 {
 	mutex_lock_defer(&rcu_defer_mutex);
@@ -277,16 +296,18 @@ void rcu_defer_barrier_thread(void)
  * guaranteed to be executed if there is explicit synchronization between
  * the thread adding to the queue and the thread issuing the defer_barrier call.
  */
-
+//执行注册的rcu回调
 void rcu_defer_barrier(void)
 {
 	struct defer_queue *index;
 	unsigned long num_items = 0;
 
+	//如果队列为空，则退出
 	if (cds_list_empty(&registry_defer))
 		return;
 
 	mutex_lock_defer(&rcu_defer_mutex);
+	//遍历register_defer中每个元素，计算其包含的元素数目
 	cds_list_for_each_entry(index, &registry_defer, list) {
 		index->last_head = CMM_LOAD_SHARED(index->head);
 		num_items += index->last_head - index->tail;
@@ -296,9 +317,11 @@ void rcu_defer_barrier(void)
 		 * We skip the grace period because there are no queued
 		 * callbacks to execute.
 		 */
-		goto end;
+		goto end;//数目为0，没有必要执行，跳出
 	}
+	//等待rcu写操作可执行
 	synchronize_rcu();
+	//遍历register_defer上所有队列，执行这些队列中注册的回调
 	cds_list_for_each_entry(index, &registry_defer, list)
 		rcu_defer_barrier_queue(index, index->last_head);
 end:
@@ -308,6 +331,7 @@ end:
 /*
  * _defer_rcu - Queue a RCU callback.
  */
+//添加一个rcu的callback
 static void _defer_rcu(void (*fct)(void *p), void *p)
 {
 	unsigned long head, tail;
@@ -323,6 +347,7 @@ static void _defer_rcu(void (*fct)(void *p), void *p)
 	 * If queue is full, or reached threshold. Empty queue ourself.
 	 * Worse-case: must allow 2 supplementary entries for fct pointer.
 	 */
+	//当队列要满时，加锁执行队列
 	if (caa_unlikely(head - tail >= DEFER_QUEUE_SIZE - 2)) {
 		assert(head - tail <= DEFER_QUEUE_SIZE);
 		rcu_defer_barrier_thread();
@@ -350,24 +375,29 @@ static void _defer_rcu(void (*fct)(void *p), void *p)
 			|| p == DQ_FCT_MARK)) {
 		URCU_TLS(defer_queue).last_fct_in = fct;
 		if (caa_unlikely(DQ_IS_FCT_BIT(fct) || fct == DQ_FCT_MARK)) {
+			//存入DQ_FCT_MARK,存入fct
 			_CMM_STORE_SHARED(URCU_TLS(defer_queue).q[head++ & DEFER_QUEUE_MASK],
 				      DQ_FCT_MARK);
 			_CMM_STORE_SHARED(URCU_TLS(defer_queue).q[head++ & DEFER_QUEUE_MASK],
 				      fct);
 		} else {
+			//存入fct(定义为函数)
 			DQ_SET_FCT_BIT(fct);
 			_CMM_STORE_SHARED(URCU_TLS(defer_queue).q[head++ & DEFER_QUEUE_MASK],
 				      fct);
 		}
 	}
+	//存入参数
 	_CMM_STORE_SHARED(URCU_TLS(defer_queue).q[head++ & DEFER_QUEUE_MASK], p);
 	cmm_smp_wmb();	/* Publish new pointer before head */
 			/* Write q[] before head. */
+	//更新head
 	CMM_STORE_SHARED(URCU_TLS(defer_queue).head, head);
 	cmm_smp_mb();	/* Write queue head before read futex */
 	/*
 	 * Wake-up any waiting defer thread.
 	 */
+	//使线程不再等待
 	wake_up_defer();
 }
 
@@ -379,10 +409,10 @@ static void *thr_defer(void *args)
 		 * to perform whatsoever. Aims at saving laptop battery life by
 		 * leaving the processor in sleep state when idle.
 		 */
-		wait_defer();
+		wait_defer();//等待defer_thread_futex为-1（等待队列不为空）
 		/* Sleeping after wait_defer to let many callbacks enqueue */
-		(void) poll(NULL,0,100);	/* wait for 100ms */
-		rcu_defer_barrier();
+		(void) poll(NULL,0,100);	/* wait for 100ms */ //再等待100ms
+		rcu_defer_barrier();//执行回调
 	}
 
 	return NULL;
@@ -391,12 +421,13 @@ static void *thr_defer(void *args)
 /*
  * library wrappers to be used by non-LGPL compatible source code.
  */
-
+//添加一个rcu回调
 void defer_rcu(void (*fct)(void *p), void *p)
 {
 	_defer_rcu(fct, p);
 }
 
+//创建defer线程
 static void start_defer_thread(void)
 {
 	int ret;
@@ -405,30 +436,36 @@ static void start_defer_thread(void)
 	assert(!ret);
 }
 
+//停止defer线程
 static void stop_defer_thread(void)
 {
 	int ret;
 	void *tret;
 
+	//标记需要停止线程
 	_CMM_STORE_SHARED(defer_thread_stop, 1);
 	/* Store defer_thread_stop before testing futex */
 	cmm_smp_mb();
 	wake_up_defer();
 
+	//等待线程退出
 	ret = pthread_join(tid_defer, &tret);
 	assert(!ret);
 
+	//清楚停止标记，以便重用
 	CMM_STORE_SHARED(defer_thread_stop, 0);
 	/* defer thread should always exit when futex value is 0 */
 	assert(uatomic_read(&defer_thread_futex) == 0);
 }
 
+//创建defer_queue,并创建一个defer线程
 int rcu_defer_register_thread(void)
 {
 	int was_empty;
 
 	assert(URCU_TLS(defer_queue).last_head == 0);
 	assert(URCU_TLS(defer_queue).q == NULL);
+	//申请队列
 	URCU_TLS(defer_queue).q = malloc(sizeof(void *) * DEFER_QUEUE_SIZE);
 	if (!URCU_TLS(defer_queue).q)
 		return -ENOMEM;
@@ -436,15 +473,18 @@ int rcu_defer_register_thread(void)
 	mutex_lock_defer(&defer_thread_mutex);
 	mutex_lock_defer(&rcu_defer_mutex);
 	was_empty = cds_list_empty(&registry_defer);
+	//将registery_defer加入到队列中
 	cds_list_add(&URCU_TLS(defer_queue).list, &registry_defer);
 	mutex_unlock(&rcu_defer_mutex);
 
 	if (was_empty)
+		//如果是第一次进入，则创建defer线程
 		start_defer_thread();
 	mutex_unlock(&defer_thread_mutex);
 	return 0;
 }
 
+//解注册defer线程（执行清空已注册的回调）
 void rcu_defer_unregister_thread(void)
 {
 	int is_empty;
@@ -463,6 +503,7 @@ void rcu_defer_unregister_thread(void)
 	mutex_unlock(&defer_thread_mutex);
 }
 
+//断言register_defer为空
 void rcu_defer_exit(void)
 {
 	assert(cds_list_empty(&registry_defer));

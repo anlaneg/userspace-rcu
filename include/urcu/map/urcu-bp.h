@@ -34,7 +34,7 @@
 
 /* Mapping macros to allow multiple flavors in a single binary. */
 
-//读加锁
+//读加锁（bp方式不要求显示调用rcu_register_thread，在rcu_read_lock时隐式调用）
 #define rcu_read_lock			rcu_read_lock_bp
 #define _rcu_read_lock			_rcu_read_lock_bp
 
@@ -44,11 +44,18 @@
 
 #define rcu_read_ongoing		rcu_read_ongoing_bp
 #define _rcu_read_ongoing		_rcu_read_ongoing_bp
+
 #define rcu_register_thread		rcu_register_thread_bp
+
 #define rcu_unregister_thread		rcu_unregister_thread_bp
+
 #define rcu_init			rcu_init_bp
+
 #define rcu_exit			rcu_exit_bp
+
+//等待rcu延时到期
 #define synchronize_rcu			synchronize_rcu_bp
+
 #define rcu_reader			rcu_reader_bp
 #define rcu_gp				rcu_gp_bp
 
@@ -69,6 +76,7 @@
 #define call_rcu_after_fork_child	call_rcu_after_fork_child_bp
 #define rcu_barrier			rcu_barrier_bp
 
+//defer相关
 #define defer_rcu			defer_rcu_bp
 #define rcu_defer_register_thread	rcu_defer_register_thread_bp
 #define rcu_defer_unregister_thread	rcu_defer_unregister_thread_bp

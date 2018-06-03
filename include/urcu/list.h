@@ -25,6 +25,7 @@
 #ifndef _CDS_LIST_H
 #define _CDS_LIST_H	1
 
+//简单双链表实现
 /*
  * The definitions of this file are adopted from those which can be
  * found in the Linux kernel headers to enable people familiar with the

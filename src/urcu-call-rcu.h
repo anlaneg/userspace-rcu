@@ -74,6 +74,7 @@ void call_rcu(struct rcu_head *head,
 
 struct call_rcu_data *create_call_rcu_data(unsigned long flags,
 					   int cpu_affinity);
+
 void call_rcu_data_free(struct call_rcu_data *crdp);
 
 struct call_rcu_data *get_default_call_rcu_data(void);

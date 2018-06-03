@@ -35,6 +35,7 @@
 	__extension__			\
 	({				\
 		cmm_smp_rmc();		\
+		/*读取p指针，防编译器乱序*/\
 		_CMM_LOAD_SHARED(p);	\
 	})
 
@@ -42,6 +43,7 @@
  * Identify a shared store. A cmm_smp_wmc() or cmm_smp_mc() should
  * follow the store.
  */
+//设置x指针指向的元素为v,防编译器乱序
 #define _CMM_STORE_SHARED(x, v)	__extension__ ({ CMM_ACCESS_ONCE(x) = (v); })
 
 /*

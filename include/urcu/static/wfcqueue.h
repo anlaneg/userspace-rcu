@@ -564,7 +564,7 @@ ___cds_wfcq_splice(
 		//自src_q_head中摘下list
 		head = uatomic_xchg(&src_q_head->node.next, NULL);
 		if (head)
-			break;	/* non-empty */　//源队列元素非空，返回
+			break;	/* non-empty */ //源队列元素非空，返回
 		if (CMM_LOAD_SHARED(src_q_tail->p) == &src_q_head->node)
 			return CDS_WFCQ_RET_SRC_EMPTY;//再次检查src_q_head为空
 		if (___cds_wfcq_busy_wait(&attempt, blocking))
