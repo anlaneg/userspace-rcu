@@ -131,7 +131,7 @@ static void maxcpus_reset(void)
 }
 
 /* Allocate the array if it has not already been allocated. */
-
+//通过调用此函数，可使得maxcpu为非0，从而控制创建的线程数(容许创建多个rcu_call线程）
 static void alloc_cpu_call_rcu_data(void)
 {
 	struct call_rcu_data **p;
@@ -165,7 +165,7 @@ static void alloc_cpu_call_rcu_data(void)
  * constant.
  */
 static struct call_rcu_data **per_cpu_call_rcu_data = NULL;
-static const long maxcpus = -1;
+static const long maxcpus = -1;//默认为-1,即只创建一个default rcu线程
 
 static void maxcpus_reset(void)
 {
@@ -594,7 +594,7 @@ struct call_rcu_data *get_default_call_rcu_data(void)
 		call_rcu_unlock(&call_rcu_mutex);
 		return default_call_rcu_data;
 	}
-	//创建default_call_rcu_data,指定cpu亲昵性为all，flags为0
+	//创建default_call_rcu_data,指定cpu亲昵性不设置，flags为0，创建一个rcu回调的执行线程
 	call_rcu_data_init(&default_call_rcu_data, 0, -1);
 	call_rcu_unlock(&call_rcu_mutex);
 	return default_call_rcu_data;
@@ -620,13 +620,14 @@ struct call_rcu_data *get_call_rcu_data(void)
 	if (URCU_TLS(thread_call_rcu_data) != NULL)
 		return URCU_TLS(thread_call_rcu_data);
 
+	//当maxcpus大于0时，在每个cpu上都有一个rcu的回调函数
 	if (maxcpus > 0) {
 		crd = get_cpu_call_rcu_data(urcu_sched_getcpu());
 		if (crd)
 			return crd;
 	}
 
-	//创建rcu_data
+	//由于maxcpu<=0,此时仅支持创建一个rcu_call线程，故创建default_rcu_data
 	return get_default_call_rcu_data();
 }
 
@@ -661,8 +662,9 @@ void set_thread_call_rcu_data(struct call_rcu_data *crdp)
  * function if you want that behavior. Should be paired with
  * free_all_cpu_call_rcu_data() to teardown these call_rcu worker
  * threads.
+ * 为每个cpu创建一个单独的call_rcu线程，不会替换忆存在的call_rcu 线程
  */
-//采用flags创建所有cpu的rcu_data
+//调用此函数会导致为每个cpu创建单独的rcu_call线程
 int create_all_cpu_call_rcu_data(unsigned long flags)
 {
 	int i;
@@ -670,6 +672,7 @@ int create_all_cpu_call_rcu_data(unsigned long flags)
 	int ret;
 
 	call_rcu_lock(&call_rcu_mutex);
+	//目前此函数有两个版本，一者通过sysconf获取cpu数量，并申请足量的alloc_cpu_call_rcu_data，一者，nothing to do
 	alloc_cpu_call_rcu_data();
 	call_rcu_unlock(&call_rcu_mutex);
 	if (maxcpus <= 0) {
@@ -689,7 +692,7 @@ int create_all_cpu_call_rcu_data(unsigned long flags)
 			call_rcu_unlock(&call_rcu_mutex);
 			continue;
 		}
-		//针对cpu$i创建rcu_data,及执行rcu回调的
+		//针对cpu$i创建rcu_data,及执行rcu回调的(创建rcu执行线程）
 		crdp = __create_call_rcu_data(flags, i);
 		if (crdp == NULL) {
 			call_rcu_unlock(&call_rcu_mutex);
@@ -758,7 +761,7 @@ void call_rcu(struct rcu_head *head,
 	/* Holding rcu read-side lock across use of per-cpu crdp */
 	//加读锁
 	_rcu_read_lock();
-	crdp = get_call_rcu_data();//取私有数据
+	crdp = get_call_rcu_data();//取私有数据（可引发创建rcu_call执行线程）
 	_call_rcu(head, func, crdp);//将回调添加到线程自身的队列中
 	//解读锁
 	_rcu_read_unlock();

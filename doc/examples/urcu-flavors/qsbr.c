@@ -104,7 +104,7 @@ int main(int argc, char **argv)
 		 * call_rcu() can be called from RCU read-side critical
 		 * sections.
 		 */
-		call_rcu(&node->rcu_head, rcu_free_node);
+		call_rcu(&node->rcu_head, rcu_free_node);//设置rcu回调
 	}
 
 	/*
@@ -113,7 +113,7 @@ int main(int argc, char **argv)
 	 * every online registered RCU threads in the program
 	 * periodically.
 	 */
-	rcu_quiescent_state();
+	rcu_quiescent_state();//明确指出当前处理静止状态
 
 	/*
 	 * For QSBR flavor, when a thread needs to be in a quiescent
@@ -134,7 +134,7 @@ int main(int argc, char **argv)
 	 * read-side critical section, but synchronize_rcu() ensures the
 	 * caller thread is offline, thus acting as a quiescent state.
 	 */
-	synchronize_rcu();
+	synchronize_rcu();//rcu同步等待
 
 	/*
 	 * Waiting for previously called call_rcu handlers to complete

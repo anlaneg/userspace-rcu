@@ -84,7 +84,7 @@ struct rcu_reader {
 	/* Data used for registry */
 	struct cds_list_head node __attribute__((aligned(CAA_CACHE_LINE_SIZE)));
 	int waiting;
-	pthread_t tid;
+	pthread_t tid;//记录当前线程号
 	/* Reader registered flag, for internal checks. */
 	unsigned int registered:1;
 };
@@ -97,17 +97,18 @@ extern DECLARE_URCU_TLS(struct rcu_reader, rcu_reader);
 static inline void wake_up_gp(void)
 {
 	if (caa_unlikely(_CMM_LOAD_SHARED(URCU_TLS(rcu_reader).waiting))) {
-		//如果waiting为1，将其置为0
+		//如果自身被waiting，将其置为0，对外表达waiting条件满足
 		_CMM_STORE_SHARED(URCU_TLS(rcu_reader).waiting, 0);
 		cmm_smp_mb();
 		if (uatomic_read(&rcu_gp.futex) != -1)
-			return;//如果未等待，则不通知
-		uatomic_set(&rcu_gp.futex, 0);//否则知会等待方
+			return;//如果未采用futex等待，则不通知
+		uatomic_set(&rcu_gp.futex, 0);//修改变量
 		/*
 		 * Ignoring return value until we can make this function
 		 * return something (because urcu_die() is not publicly
 		 * exposed).
 		 */
+		//唤醒等待者
 		(void) futex_noasync(&rcu_gp.futex, FUTEX_WAKE, 1,
 				NULL, NULL, 0);
 	}
@@ -119,9 +120,12 @@ static inline enum rcu_state rcu_reader_state(unsigned long *ctr)
 
 	v = CMM_LOAD_SHARED(*ctr);
 	if (!v)
+		//版本号为0,rcu_gp.ctr在增加时，不会再变更为0，故认为线程offline
 		return RCU_READER_INACTIVE;
 	if (v == rcu_gp.ctr)
+		//与rcu_gp版本相等，则认为同步（上个周期的锁已释放）
 		return RCU_READER_ACTIVE_CURRENT;
+	//需要等待（还未与rcu_gp保持同步，上个周期的锁可能还未释放）
 	return RCU_READER_ACTIVE_OLD;
 }
 
@@ -195,9 +199,10 @@ static inline void _rcu_quiescent_state(void)
 {
 	unsigned long gp_ctr;
 
-	urcu_assert(URCU_TLS(rcu_reader).registered);
+	urcu_assert(URCU_TLS(rcu_reader).registered);//线程已注册
 	if ((gp_ctr = CMM_LOAD_SHARED(rcu_gp.ctr)) == URCU_TLS(rcu_reader).ctr)
-		return;
+		return;//如果rcu_reader与rcu_gp相等，则不需要wakeup
+	//gp_ctr是rcu_gp的一个副本，设置rcu_reader.ctr为gp_ctr与gp_ctr保持同步
 	_rcu_quiescent_state_update_and_wakeup(gp_ctr);
 }
 
@@ -213,9 +218,9 @@ static inline void _rcu_thread_offline(void)
 {
 	urcu_assert(URCU_TLS(rcu_reader).registered);
 	cmm_smp_mb();
-	CMM_STORE_SHARED(URCU_TLS(rcu_reader).ctr, 0);
+	CMM_STORE_SHARED(URCU_TLS(rcu_reader).ctr, 0);//将自身ctr置为0
 	cmm_smp_mb();	/* write URCU_TLS(rcu_reader).ctr before read futex */
-	wake_up_gp();
+	wake_up_gp();//如果写线程在等待，则会知写线程我们已退出
 	cmm_barrier();	/* Ensure the compiler does not reorder us with mutex */
 }
 
@@ -231,6 +236,7 @@ static inline void _rcu_thread_online(void)
 {
 	urcu_assert(URCU_TLS(rcu_reader).registered);
 	cmm_barrier();	/* Ensure the compiler does not reorder us with mutex */
+	//获取rcu_pg.ctr
 	_CMM_STORE_SHARED(URCU_TLS(rcu_reader).ctr, CMM_LOAD_SHARED(rcu_gp.ctr));
 	cmm_smp_mb();
 }

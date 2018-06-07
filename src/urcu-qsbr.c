@@ -71,7 +71,7 @@ struct rcu_gp rcu_gp = { .ctr = RCU_GP_ONLINE };
 /*
  * Active attempts to check for reader Q.S. before calling futex().
  */
-#define RCU_QS_ACTIVE_ATTEMPTS 100
+#define RCU_QS_ACTIVE_ATTEMPTS 100 //通过调整此参数可保证少调用futex系统调用
 
 /*
  * Written to only by each individual reader. Read by both the reader and the
@@ -121,7 +121,7 @@ static void wait_gp(void)
 	/* Read reader_gp before read futex */
 	cmm_smp_rmb();
 	if (uatomic_read(&rcu_gp.futex) != -1)
-		return;
+		return;//防止read端已恢复为0
 	while (futex_noasync(&rcu_gp.futex, FUTEX_WAIT, -1,
 			NULL, NULL, 0)) {
 		switch (errno) {
@@ -156,14 +156,16 @@ static void wait_for_readers(struct cds_list_head *input_readers,
 	 */
 	for (;;) {
 		if (wait_loops < RCU_QS_ACTIVE_ATTEMPTS)
-			wait_loops++;
+			wait_loops++;//计数，用于区分futex等待，普通等待
 		if (wait_loops >= RCU_QS_ACTIVE_ATTEMPTS) {
+			//等待时间较长，采用futex方式进行等待
 			uatomic_set(&rcu_gp.futex, -1);
 			/*
 			 * Write futex before write waiting (the other side
 			 * reads them in the opposite order).
 			 */
 			cmm_smp_wmb();
+			//通过标记index->waiting为1，来知会读者，我们在等待
 			cds_list_for_each_entry(index, input_readers, node) {
 				_CMM_STORE_SHARED(index->waiting, 1);//将其置为1表示等待
 			}
@@ -179,7 +181,7 @@ static void wait_for_readers(struct cds_list_head *input_readers,
 					break;
 				}
 				/* Fall-through */
-			case RCU_READER_INACTIVE:
+			case RCU_READER_INACTIVE://这种情况下为线程offline
 				cds_list_move(&index->node, qsreaders);
 				break;
 			case RCU_READER_ACTIVE_OLD:
@@ -189,11 +191,13 @@ static void wait_for_readers(struct cds_list_head *input_readers,
 				 * until the snapshot becomes current or
 				 * the reader becomes inactive.
 				 */
-				break;
+				break;//这种是仍持有锁的情况
 			}
 		}
 
 		if (cds_list_empty(input_readers)) {
+			//如有input_readers均已完成读锁释放，检查我们是否将futex更改为－1了
+			//如果是将其更改为0
 			if (wait_loops >= RCU_QS_ACTIVE_ATTEMPTS) {
 				/* Read reader_gp before write futex */
 				cmm_smp_mb();
@@ -201,10 +205,12 @@ static void wait_for_readers(struct cds_list_head *input_readers,
 			}
 			break;
 		} else {
+			//仍然存在读者未释放锁的情况，先简单尝试让出cpu
+			//如果尝试次数过多，则我们通过futex进行等待
 			/* Temporarily unlock the registry lock. */
-			mutex_unlock(&rcu_registry_lock);
+			mutex_unlock(&rcu_registry_lock);//临时解开注册锁
 			if (wait_loops >= RCU_QS_ACTIVE_ATTEMPTS) {
-				wait_gp();
+				wait_gp();//超试次数过多，通过futex进行等待
 			} else {
 #ifndef HAS_INCOHERENT_CACHES
 				caa_cpu_relax();
@@ -354,8 +360,11 @@ void synchronize_rcu(void)
 	 * Mark the writer thread offline to make sure we don't wait for
 	 * our own quiescent state. This allows using synchronize_rcu()
 	 * in threads registered as readers.
+	 * 如果我们需要在注册为readers的线程上调用synchronize_rcu，则需要在调用本函数
+	 * 前将自已标记为offline
 	 */
 	if (was_online)
+		//看rcu_thread_offline，was_online为0时表示线程不在线（常为空闲）
 		rcu_thread_offline();
 	else
 		cmm_smp_mb();
@@ -365,6 +374,7 @@ void synchronize_rcu(void)
 	 * for a grace period. Proceed to perform the grace period only
 	 * if we are the first thread added into the queue.
 	 */
+	//此函数不支持并发，会出现两个线程均返回0的情况（异常逻辑）
 	if (urcu_wait_add(&gp_waiters, &wait) != 0) {
 		/* Not first in queue: will be awakened by another thread. */
 		urcu_adaptative_busy_wait(&wait);
@@ -373,19 +383,23 @@ void synchronize_rcu(void)
 	/* We won't need to wake ourself up */
 	urcu_wait_set_state(&wait, URCU_WAIT_RUNNING);
 
-	mutex_lock(&rcu_gp_lock);
+	//多个线程调用synchronize_rcu时，如果有线程已进入，则后来的first线程会阻塞在这里
+	//而后面再来的lasts线程可以使排在这里的线程first代表自已等待，后来的lasts线程将阻塞在urcu_adaptative_busy_wait处
+	//等first等待完成后，直接跳到gp_end完成等待（正常逻辑）
+	mutex_lock(&rcu_gp_lock);//但均返回0的两个线程中有一个线程会阻塞在此处（异常逻辑）
 
 	/*
 	 * Move all waiters into our local queue.
 	 */
-	urcu_move_waiters(&waiters, &gp_waiters);
+	urcu_move_waiters(&waiters, &gp_waiters);//这会导致出队的waiters中并不包含自已的wait
 
 	mutex_lock(&rcu_registry_lock);
 
 	if (cds_list_empty(&registry))
-		goto out;
+		goto out;//无线程注册，单线程情况，直接返回
 
 	/* Increment current G.P. */
+	//周期增加(由于加的不是1，故没有绕圈问题,不会现回归到0)
 	CMM_STORE_SHARED(rcu_gp.ctr, rcu_gp.ctr + RCU_GP_CTR);
 
 	/*
@@ -414,10 +428,14 @@ void synchronize_rcu(void)
 	/*
 	 * Put quiescent reader list back into registry.
 	 */
-	cds_list_splice(&qsreaders, &registry);
+	cds_list_splice(&qsreaders, &registry);//还原registry
 out:
+	//解开线程注册锁
 	mutex_unlock(&rcu_registry_lock);
+	//解开gp_lock,容许其它synchronize_rcu可进入
 	mutex_unlock(&rcu_gp_lock);
+	//由于我们进入时合并了同一组的waiter,现在我们等待结束，也就是说与我们一起的均等待结束了，我们需要通知它们直接跳过等待
+	//看urcu_adaptative_busy_wait(&wait);goto gp_end;
 	urcu_wake_all_waiters(&waiters);
 gp_end:
 	if (was_online)
@@ -441,11 +459,13 @@ void rcu_read_unlock(void)
 	_rcu_read_unlock();
 }
 
+//检查read是否还处于online情况
 int rcu_read_ongoing(void)
 {
 	return _rcu_read_ongoing();
 }
 
+//对外明确指明当前线程处于静止状态
 void rcu_quiescent_state(void)
 {
 	_rcu_quiescent_state();
@@ -461,28 +481,34 @@ void rcu_thread_online(void)
 	_rcu_thread_online();
 }
 
+//注册当前线程
 void rcu_register_thread(void)
 {
 	URCU_TLS(rcu_reader).tid = pthread_self();
-	assert(URCU_TLS(rcu_reader).ctr == 0);
+	assert(URCU_TLS(rcu_reader).ctr == 0);//断言__thread变量均被设置为0
 
+	//加锁保护注册过程
 	mutex_lock(&rcu_registry_lock);
-	assert(!URCU_TLS(rcu_reader).registered);
-	URCU_TLS(rcu_reader).registered = 1;
-	cds_list_add(&URCU_TLS(rcu_reader).node, &registry);
-	mutex_unlock(&rcu_registry_lock);
+	assert(!URCU_TLS(rcu_reader).registered);//断言必然未注册
+	URCU_TLS(rcu_reader).registered = 1;//标记注册
+	cds_list_add(&URCU_TLS(rcu_reader).node, &registry);//加入到链表
+	mutex_unlock(&rcu_registry_lock);//注册完成
+
+	//自rcu_gp上更新crc
 	_rcu_thread_online();
 }
 
+//解注册当前线程
 void rcu_unregister_thread(void)
 {
 	/*
 	 * We have to make the thread offline otherwise we end up dealocking
 	 * with a waiting writer.
 	 */
-	_rcu_thread_offline();
+	_rcu_thread_offline();//使线程下线
 	assert(URCU_TLS(rcu_reader).registered);
 	URCU_TLS(rcu_reader).registered = 0;
+	//加锁自node中移除
 	mutex_lock(&rcu_registry_lock);
 	cds_list_del(&URCU_TLS(rcu_reader).node);
 	mutex_unlock(&rcu_registry_lock);

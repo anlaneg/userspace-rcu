@@ -153,6 +153,9 @@ int _cds_wfs_push(cds_wfs_stack_ptr_t u_stack, struct cds_wfs_node *node)
 	 * to node (setting it to NULL) before publication.
 	 */
 	//将新添加的元素放在栈顶（采用原子操作）
+	//采用原子的交换指令（将s->head指向new_head,将new_head指向s->head)
+	//如果两个cpu同时针对同一个s->head执行写指令，则old_head是否返回相同的值？
+	//如果是这样，此函数非线程安全。
 	old_head = uatomic_xchg(&s->head, new_head);
 	/*
 	 * At this point, dequeuers see a NULL node->next, they should
