@@ -134,7 +134,7 @@ int main(int argc, char **argv)
 	 * read-side critical section, but synchronize_rcu() ensures the
 	 * caller thread is offline, thus acting as a quiescent state.
 	 */
-	synchronize_rcu();//rcu同步等待
+	synchronize_rcu();//rcu同步等待(由于当前线程不会退出，故会一直在此处等待）
 
 	/*
 	 * Waiting for previously called call_rcu handlers to complete
